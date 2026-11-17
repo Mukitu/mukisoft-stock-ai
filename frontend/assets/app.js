@@ -1,11 +1,9 @@
 // ============================================================
-// MukiSoft Stock AI - Dynamic Ticker, Sector Selector & Fail-Safe Engine
+// MukiSoft AI - 100% Dynamic Live Data & Interactive Controller
 // ============================================================
 
-// Render-e deploy korar por tomar live Render URL-ti ekhane boshabe:
-const API_BASE_URL = "http://localhost:8000";
+const API_BASE_URL = "https://mukisoft-stock-ai.onrender.com";
 
-// DSE & CSE All Major Sectors & Stocks Directory
 const SECTOR_STOCKS = {
   "Pharmaceuticals & Chemicals": ["SQURPHARMA", "RENATA", "BXPHARMA", "ACMEPL", "BEACONPHAR", "ORIONPHARM", "ACI", "IBNSINA"],
   "Telecommunication": ["GP", "ROBI", "BSCCL"],
@@ -23,20 +21,15 @@ let selectedExchange = "DSE";
 let priceChartInstance = null;
 
 document.addEventListener("DOMContentLoaded", () => {
-  // Mobile menu
   const menuBtn = document.getElementById("mobile-menu-btn");
   const mobileMenu = document.getElementById("mobile-menu");
   if (menuBtn && mobileMenu) {
     menuBtn.addEventListener("click", () => mobileMenu.classList.toggle("hidden"));
   }
 
-  // Dynamic Landing Page Ticker & Sample Card
   loadDynamicLandingData();
-
-  // Populate Sector & Stock Dropdowns on Analyzer Page
   initSectorDropdowns();
 
-  // Check URL Query Params
   const params = new URLSearchParams(window.location.search);
   const urlSymbol = params.get("symbol");
   const urlExchange = params.get("exchange");
@@ -52,33 +45,55 @@ document.addEventListener("DOMContentLoaded", () => {
 async function loadDynamicLandingData() {
   const dsexEl = document.getElementById("live-dsex");
   const ds30El = document.getElementById("live-ds30");
+  const updEl = document.getElementById("live-updated");
   if (!dsexEl) return;
 
+  // 1. Live Market Ticker
   try {
     const res = await fetch(`${API_BASE_URL}/api/market-live`);
     if (res.ok) {
       const mkt = await res.json();
+      dsexEl.classList.remove("animate-pulse");
       dsexEl.innerText = mkt.dsex;
-      if (ds30El) ds30El.innerText = mkt.ds30;
+      if (ds30El) {
+        ds30El.classList.remove("animate-pulse");
+        ds30El.innerText = mkt.ds30;
+      }
+      if (updEl) updEl.innerText = mkt.updated;
+    } else {
+      dsexEl.innerText = "DSE Live";
+      if (ds30El) ds30El.innerText = "CSE Live";
     }
+  } catch (_) {
+    dsexEl.innerText = "DSE Online";
+    if (ds30El) ds30El.innerText = "CSE Online";
+  }
 
-    // Dynamic Sample Card on Landing Page
+  // 2. Live Terminal Card on Landing Page
+  const sigEl = document.getElementById("sample-signal");
+  try {
     const sampleRes = await fetch(`${API_BASE_URL}/api/analyze?symbol=SQURPHARMA&exchange=DSE`);
     if (sampleRes.ok) {
       const sData = await sampleRes.json();
-      const pEl = document.getElementById("sample-price");
-      const tEl = document.getElementById("sample-target");
-      const slEl = document.getElementById("sample-stoploss");
-      const sigEl = document.getElementById("sample-signal");
-      const txtEl = document.getElementById("sample-ai-text");
-      if (pEl) pEl.innerText = `৳ ${sData.current_price.toFixed(2)}`;
-      if (tEl) tEl.innerText = `৳ ${sData.target_price}`;
-      if (slEl) slEl.innerText = `৳ ${sData.stop_loss}`;
-      if (sigEl) sigEl.innerText = `${sData.signal} • ${sData.confidence}%`;
-      if (txtEl) txtEl.innerText = `"${sData.ai_analysis_bn}"`;
+      document.getElementById("sample-price").innerText = `৳ ${Number(sData.current_price).toFixed(2)}`;
+      document.getElementById("sample-target").innerText = `৳ ${sData.target_price}`;
+      document.getElementById("sample-stoploss").innerText = `৳ ${sData.stop_loss}`;
+      if (sigEl) {
+        sigEl.classList.remove("animate-pulse");
+        sigEl.innerText = `${sData.signal} • ${sData.confidence}%`;
+      }
+      document.getElementById("sample-ai-text").innerText = `"${sData.ai_analysis_bn}"`;
+    } else if (sigEl) {
+      sigEl.classList.remove("animate-pulse");
+      sigEl.innerText = "টার্মিনাল প্রস্তুত";
+      document.getElementById("sample-ai-text").innerText =
+        "যেকোনো শেয়ারের রিয়েল-টাইম বিশ্লেষণ দেখতে উপরের সার্চ বক্সে কোম্পানির কোড লিখে 'বিশ্লেষণ দেখুন' বাটনে ক্লিক করুন।";
     }
   } catch (_) {
-    // Silent fallback if backend is sleeping
+    if (sigEl) {
+      sigEl.classList.remove("animate-pulse");
+      sigEl.innerText = "টার্মিনাল প্রস্তুত";
+    }
   }
 }
 
@@ -159,7 +174,6 @@ async function runStockAnalysis(e) {
     resultBox.classList.remove("hidden");
   } catch (err) {
     loader.classList.add("hidden");
-    // Open Manual Input Box with clear Bengali guide & direct DSE/CSE links
     document.getElementById("manual-symbol-label").innerText = `${symbol} (${selectedExchange})`;
     manualBox.classList.remove("hidden");
   } finally {
@@ -198,7 +212,7 @@ async function runManualAnalysis(e) {
     resultBox.classList.remove("hidden");
   } catch (err) {
     loader.classList.add("hidden");
-    alert("সার্ভারের সাথে সংযোগ হচ্ছে না। অনুগ্রহ করে Render ব্যাকএন্ড লিংক চেক করুন।");
+    alert("সার্ভারের সাথে সংযোগ হচ্ছে না। একটু পর আবার চেষ্টা করুন।");
   }
 }
 

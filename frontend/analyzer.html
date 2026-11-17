@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>AI Stock Analyzer — MukiSoft Stock AI</title>
+  <title>MukiSoft AI Stock Analyzer — DSE & CSE</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
@@ -16,11 +16,11 @@
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
       <a href="index.html" class="flex items-center gap-3">
         <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 to-cyan-500 flex items-center justify-center font-extrabold text-white text-lg">M</div>
-        <span class="text-lg font-extrabold text-white">MukiSoft <span class="text-blue-400">Stock AI</span></span>
+        <span class="text-lg font-extrabold text-white">MukiSoft <span class="text-blue-400">AI</span></span>
       </a>
       <nav class="hidden md:flex items-center gap-1 bg-slate-900/80 p-1 rounded-xl border border-slate-800">
         <a href="index.html" class="px-4 py-2 rounded-lg text-sm font-medium text-slate-300 hover:bg-slate-800">হোম (Home)</a>
-        <a href="analyzer.html" class="px-4 py-2 rounded-lg text-sm font-semibold bg-blue-600 text-white">AI অ্যানালাইজার</a>
+        <a href="analyzer.html" class="px-4 py-2 rounded-lg text-sm font-semibold bg-blue-600 text-white">MukiSoft AI অ্যানালাইজার</a>
         <a href="market.html" class="px-4 py-2 rounded-lg text-sm font-medium text-slate-300 hover:bg-slate-800">DSE / CSE মার্কেট</a>
         <a href="about.html" class="px-4 py-2 rounded-lg text-sm font-medium text-slate-300 hover:bg-slate-800">আমাদের সম্পর্কে</a>
         <a href="contact.html" class="px-4 py-2 rounded-lg text-sm font-medium text-slate-300 hover:bg-slate-800">যোগাযোগ</a>
@@ -34,7 +34,6 @@
       <h1 class="text-2xl font-bold text-white mb-1">DSE ও CSE স্মার্ট স্টক অ্যানালাইজার</h1>
       <p class="text-slate-400 text-sm mb-6">প্রথমে সেক্টর ও কোম্পানি সিলেক্ট করুন অথবা সরাসরি ট্রেডিং কোড লিখে বিশ্লেষণ করুন।</p>
 
-      <!-- Sector + Company Dropdowns -->
       <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
         <div>
           <label class="block text-xs text-slate-400 mb-1">১. সেক্টর বাছাই করুন (All Sectors)</label>
@@ -55,7 +54,7 @@
         <input type="text" id="symbol-input" value="SQURPHARMA" placeholder="কোম্পানির কোড (যেমন: SQURPHARMA)" class="flex-1 bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl px-4 py-3 text-white uppercase font-semibold outline-none" />
 
         <button type="submit" id="submit-btn" class="bg-blue-600 hover:bg-blue-500 text-white font-bold px-8 py-3 rounded-xl shadow-lg shadow-blue-600/25 transition cursor-pointer">
-          AI Analyze করুন
+          MukiSoft AI Analyze করুন
         </button>
       </form>
     </div>
@@ -63,10 +62,10 @@
     <!-- Loader -->
     <div id="loader-box" class="hidden text-center py-12 bg-[#0B132B] border border-slate-800 rounded-2xl mb-8">
       <div class="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-3"></div>
-      <p class="text-blue-400 font-semibold">লাইভ মার্কেট ডেটা ও ৯৯.৮৮% ML মডেল বিশ্লেষণ চলছে...</p>
+      <p class="text-blue-400 font-semibold">লাইভ মার্কেট ডেটা ও MukiSoft AI বিশ্লেষণ চলছে...</p>
     </div>
 
-    <!-- Fail-Safe Manual Input Box (If live scraping is blocked by DSE/CSE firewall) -->
+    <!-- Fail-Safe Manual Input Box -->
     <div id="manual-fallback-box" class="hidden bg-amber-500/10 border border-amber-500/30 rounded-2xl p-6 md:p-8 mb-8">
       <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-amber-500/20 pb-4 mb-5">
         <div>
@@ -113,7 +112,7 @@
         </div>
         <div class="flex items-end">
           <button type="submit" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2.5 px-4 rounded-xl transition cursor-pointer">
-            মডেল দিয়ে বিশ্লেষণ করুন
+            MukiSoft AI দিয়ে বিশ্লেষণ করুন
           </button>
         </div>
       </form>
@@ -132,7 +131,7 @@
         </div>
 
         <div class="bg-[#0B132B] border border-slate-800 p-5 rounded-2xl">
-          <div class="text-xs text-slate-400 mb-2">AI মডেল সিগন্যাল</div>
+          <div class="text-xs text-slate-400 mb-2">MukiSoft AI সিগন্যাল</div>
           <div id="res-signal-badge" class="inline-block px-3 py-1 rounded-lg text-sm font-bold"></div>
           <div class="text-xs text-slate-400 mt-2">কনফিডেন্স: <strong id="res-confidence" class="text-white"></strong></div>
         </div>
@@ -150,8 +149,9 @@
         </div>
       </div>
 
+      <!-- MukiSoft AI Humanized Advice Box -->
       <div class="bg-gradient-to-r from-blue-950/50 via-[#0B132B] to-indigo-950/50 border border-blue-500/30 p-6 rounded-2xl">
-        <h3 class="text-blue-400 font-bold text-sm mb-2">🤖 Groq AI বাংলা মার্কেট বিশ্লেষণ ও পরামর্শ</h3>
+        <h3 class="text-blue-400 font-bold text-sm mb-2">💡 MukiSoft AI ট্রেডিং পরামর্শ</h3>
         <p id="res-ai-text" class="text-slate-200 text-base leading-relaxed whitespace-pre-line"></p>
       </div>
 
@@ -163,7 +163,7 @@
   </main>
 
   <footer class="border-t border-slate-800/80 bg-[#040812] py-6 text-center text-xs text-slate-500">
-    © 2026 MukiSoft Technology • DSE & CSE Quantitative Analytics
+    © 2026 MukiSoft Technology • MukiSoft AI Stock Engine
   </footer>
 
   <script src="assets/app.js"></script>

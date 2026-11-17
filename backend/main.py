@@ -8,12 +8,12 @@ import numpy as np
 import datetime as dt
 import requests
 import os
-from bdshare import get_basic_historical_data, get_market_info
+from bdshare import get_basic_historical_data, get_market_info, get_current_trade_data
 from bdshare.indicators import add_indicators
 
 os.environ["BDSHARE_SOURCE"] = "legacy"
 
-app = FastAPI(title="MukiSoft Stock AI API (DSE & CSE)")
+app = FastAPI(title="MukiSoft AI Stock Engine (DSE & CSE)")
 
 app.add_middleware(
     CORSMiddleware,
@@ -23,12 +23,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Load Trained Model & Features
 model = xgb.XGBClassifier()
 model.load_model("dse_cse_stock_model.json")
 feature_cols = joblib.load("model_features.pkl")
 
-GROQ_API_KEY = os.getenv("GROQ_API_KEY", "YOUR_GROQ_API_KEY_HERE")
+AI_API_KEY = os.getenv("GROQ_API_KEY", "")
 
 
 class ManualStockInput(BaseModel):
@@ -43,65 +42,54 @@ class ManualStockInput(BaseModel):
     rsi_14: float = 50.0
 
 
-def generate_bengali_ai_report(symbol, exchange, price, rsi, signal, confidence, target_price, stop_loss):
-    if not GROQ_API_KEY or GROQ_API_KEY == "YOUR_GROQ_API_KEY_HERE":
-        return (
-            f"{exchange}-এর {symbol} শেয়ারটির বর্তমান বাজার দর ৳{price}। "
-            f"আমাদের ৯৯.৮৮% অ্যাকুরেট ML মডেলের বিশ্লেষণ অনুযায়ী সিগন্যালটি '{signal}' (কনফিডেন্স: {confidence:.1f}%)। "
-            f"বর্তমান RSI {rsi:.1f}, সম্ভাব্য টার্গেট প্রাইস ৳{target_price} এবং রিস্ক এড়াতে স্টপ-লস ৳{stop_loss} রাখা নিরাপদ।"
-        )
+def generate_humanized_advice(symbol, exchange, price, rsi, signal, confidence, target_price, stop_loss):
+    if not AI_API_KEY:
+        raise HTTPException(status_code=500, detail="MukiSoft AI ইঞ্জিন কী কনফিগার করা নেই।")
 
     prompt = f"""
-    Tumi Bangladesh Share Market (DSE & CSE)-er ekjon senior quantitative analyst.
-    Nicher data bishleshon kore investor-ke shohoj o professional Banglay (বাংলা লিপিতে) 4-5 line-er ekta poramorsho dao:
-    - Exchange: {exchange} | Symbol: {symbol}
-    - Current Price: {price} BDT | RSI (14): {rsi:.2f}
-    - AI Signal: {signal} (Confidence: {confidence:.2f}%)
-    - Target Price: {target_price} BDT | Stop Loss: {stop_loss} BDT
-    Sheshe ek line-e risk warning dao. Shudhu Bangla text dibe.
+    Tumi Bangladesh Share Market-er ekjon senior human trader. Kono AI-er moto formal kotha bolbe na, ekdom manusher moto shohoj o choto kore (matro 3 line-e) Banglay (বাংলা লিপিতে) poramorsho dao:
+    - Share: {symbol} ({exchange}), Current Price: {price} BDT, RSI: {rsi:.1f}
+    - Signal: {signal} ({confidence:.0f}% confidence), Target: {target_price} BDT, Stop-Loss: {stop_loss} BDT
+    
+    Porishkar kore bolo: ekhon trade neya thik hobe kina, naki kotokkhon/kon dam porjonto wait kora uchit. Shudhu 3 line Bangla text dibe, kono heading ba bullet point dibe na.
     """
-    try:
-        res = requests.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
-            json={
-                "model": "llama-3.3-70b-versatile",
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.4,
-            },
-            timeout=10,
-        )
-        return res.json()["choices"][0]["message"]["content"].strip()
-    except Exception:
-        return f"{symbol} ({exchange}) এর বর্তমান মূল্য ৳{price}। AI সিগন্যাল: {signal} ({confidence:.1f}% কনফিডেন্স)। টার্গেট: ৳{target_price}, স্টপ-লস: ৳{stop_loss}।"
+
+    res = requests.post(
+        "https://api.groq.com/openai/v1/chat/completions",
+        headers={"Authorization": f"Bearer {AI_API_KEY}", "Content-Type": "application/json"},
+        json={
+            "model": "llama-3.3-70b-versatile",
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.5,
+            "max_tokens": 220,
+        },
+        timeout=12,
+    )
+    data = res.json()
+    return data["choices"][0]["message"]["content"].strip()
 
 
 @app.get("/")
 def home():
-    return {"status": "Live", "engine": "MukiSoft DSE & CSE AI v2.0"}
+    return {"status": "Live", "engine": "MukiSoft AI Dynamic Stock Engine"}
 
 
 @app.get("/api/market-live")
 def get_live_ticker():
-    """Landing page-er ticker o sample card dynamic korar jonno"""
+    """DSE o CSE-er ashol live index o top active stock data"""
     try:
         mkt = get_market_info()
         latest = mkt.iloc[0]
+        dsex_val = str(latest.get("DSEX", latest.iloc[1]))
+        ds30_val = str(latest.get("DS30", latest.iloc[2]))
         return {
-            "source": "live",
-            "dsex": str(latest.get("DSEX", "5,342.18")),
-            "ds30": str(latest.get("DS30", "1,968.40")),
-            "caspi": "14,890.12",
-            "updated": str(dt.date.today())
+            "status": "live",
+            "dsex": dsex_val,
+            "ds30": ds30_val,
+            "updated": str(latest.get("Date", dt.date.today()))
         }
-    except Exception:
-        return {
-            "source": "cached",
-            "dsex": "5,342.18",
-            "ds30": "1,968.40",
-            "caspi": "14,890.12",
-            "updated": str(dt.date.today())
-        }
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"লাইভ মার্কেট ইনডেক্স পাওয়া যাচ্ছে না: {str(e)}")
 
 
 @app.get("/api/analyze")
@@ -115,7 +103,7 @@ def analyze_stock(symbol: str, exchange: str = "DSE"):
         df = get_basic_historical_data(str(start_date), str(end_date), symbol)
 
         if df is None or len(df) < 25:
-            raise ValueError("Live scraping blocked or insufficient data")
+            raise ValueError("Live scraping blocked")
 
         df = df.reset_index()
         df.columns = [c.lower() for c in df.columns]
@@ -141,7 +129,7 @@ def analyze_stock(symbol: str, exchange: str = "DSE"):
 
         pred_class = int(model.predict(X_live)[0])
         confidence = float(np.max(model.predict_proba(X_live)[0]) * 100)
-        signal_map = {0: "High Risk / Sell", 1: "Hold / Neutral", 2: "Strong Buy"}
+        signal_map = {0: "High Risk / Sell", 1: "Hold / Wait", 2: "Strong Buy"}
         signal_text = signal_map[pred_class]
 
         current_price = float(latest['close'].values[0])
@@ -149,7 +137,7 @@ def analyze_stock(symbol: str, exchange: str = "DSE"):
         target_price = round(max(current_price * 1.05, float(latest['bb_high'].values[0])), 2)
         stop_loss = round(min(current_price * 0.96, float(latest['bb_low'].values[0])), 2)
 
-        ai_summary_bn = generate_bengali_ai_report(
+        ai_summary_bn = generate_humanized_advice(
             symbol, exchange, current_price, rsi_val, signal_text, confidence, target_price, stop_loss
         )
 
@@ -171,17 +159,15 @@ def analyze_stock(symbol: str, exchange: str = "DSE"):
             "chart_history": chart_data.to_dict(orient="records")
         }
 
-    except Exception as e:
-        # Scrape fail korle frontend-ke manual fallback trigger korar signal pathano
+    except Exception:
         raise HTTPException(
             status_code=422,
-            detail=f"অটো-স্ক্র্যাপিং সাময়িকভাবে সীমাবদ্ধ ({symbol})। নিচের ম্যানুয়াল ফর্মে DSE/CSE-এর আজকের ডেটা বসিয়ে এআই বিশ্লেষণ করুন।"
+            detail=f"অটো-ফেচ সাময়িকভাবে সীমাবদ্ধ ({symbol})। নিচের বক্সে আজকের ডেটা বসিয়ে MukiSoft AI বিশ্লেষণ দেখুন।"
         )
 
 
 @app.post("/api/analyze-manual")
 def analyze_manual_stock(payload: ManualStockInput):
-    """User manual data dile XGBoost model + Groq AI diye analysis"""
     c = payload.close_price
     o = payload.open_price
     h = payload.high_price
@@ -214,13 +200,13 @@ def analyze_manual_stock(payload: ManualStockInput):
 
     pred_class = int(model.predict(row)[0])
     confidence = float(np.max(model.predict_proba(row)[0]) * 100)
-    signal_map = {0: "High Risk / Sell", 1: "Hold / Neutral", 2: "Strong Buy"}
+    signal_map = {0: "High Risk / Sell", 1: "Hold / Wait", 2: "Strong Buy"}
     signal_text = signal_map[pred_class]
 
     target_price = round(max(c * 1.05, bb_high), 2)
     stop_loss = round(min(c * 0.96, bb_low), 2)
 
-    ai_summary_bn = generate_bengali_ai_report(
+    ai_summary_bn = generate_humanized_advice(
         payload.symbol.upper(), payload.exchange.upper(), c, payload.rsi_14, signal_text, confidence, target_price, stop_loss
     )
 
@@ -237,8 +223,8 @@ def analyze_manual_stock(payload: ManualStockInput):
         "stop_loss": stop_loss,
         "ai_analysis_bn": ai_summary_bn,
         "chart_history": [
-            {"date": "Prev-2", "close": round(sma, 2)},
-            {"date": "Prev-1", "close": round(o, 2)},
-            {"date": "Today", "close": round(c, 2)}
+            {"date": "20D Avg", "close": round(sma, 2)},
+            {"date": "Open", "close": round(o, 2)},
+            {"date": "Current", "close": round(c, 2)}
         ]
     }
