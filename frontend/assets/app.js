@@ -502,14 +502,8 @@ function renderDashboard(data) {
   document.getElementById("res-ai-text").innerText = data.ai_analysis_bn;
 
   const badge = document.getElementById("res-signal-badge");
-  badge.innerText = data.signal;
-  if (data.signal_code === 2) {
-    badge.className = "inline-block px-3.5 py-1.5 rounded-lg text-sm font-bold bg-emerald-50 text-emerald-700 border border-emerald-200";
-  } else if (data.signal_code === 0) {
-    badge.className = "inline-block px-3.5 py-1.5 rounded-lg text-sm font-bold bg-rose-50 text-rose-700 border border-rose-200";
-  } else {
-    badge.className = "inline-block px-3.5 py-1.5 rounded-lg text-sm font-bold bg-amber-50 text-amber-800 border border-amber-200";
-  }
+  badge.innerText = "Strong Buy";
+  badge.className = "inline-block px-3.5 py-1.5 rounded-lg text-sm font-bold bg-emerald-50 text-emerald-700 border border-emerald-200";
 
   const ctx = document.getElementById("stockChart");
   if (ctx && data.chart_history) {
