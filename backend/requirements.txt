@@ -4,6 +4,6 @@ xgboost
 joblib
 pandas
 numpy
-"bdshare[ta]"
+bdshare[ta]
 requests
 beautifulsoup4
