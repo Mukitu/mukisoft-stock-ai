@@ -1,5 +1,5 @@
 // ============================================================
-// MukiSoft AI - Institutional Light Theme UI & Live Engine
+// MukiSoft AI - Institutional Light Theme UI & Smart BD Session
 // ============================================================
 
 const API_BASE_URL = "https://mukisoft-stock-ai.onrender.com";
@@ -20,6 +20,60 @@ const SECTOR_STOCKS = {
 let selectedExchange = "DSE";
 let priceChartInstance = null;
 let uploadedFilesList = [];
+
+// Smart Bangladesh Time (UTC+6) Market Entry Timing Calculator
+function getSmartBDMarketTiming() {
+  const now = new Date();
+  const utcMs = now.getTime() + now.getTimezoneOffset() * 60000;
+  const bdTime = new Date(utcMs + 6 * 3600000);
+
+  const day = bdTime.getDay(); // 0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat
+  const mins = bdTime.getHours() * 60 + bdTime.getMinutes();
+
+  const isTradingDay = day >= 0 && day <= 4; // Sunday to Thursday
+
+  // 1. Live Market Hours: 10:00 AM (600) to 2:30 PM (870)
+  if (isTradingDay && mins >= 600 && mins <= 870) {
+    return {
+      isLive: true,
+      cardTiming: "এখনই এন্ট্রি জোন (Live)",
+      badge: "লাইভ মার্কেট চলছে (১০:০০ AM - ২:৩০ PM)",
+      headline: "এখনই ট্রেড নেওয়ার সেরা স্টকসমূহ (Live Buy Radar)",
+      subtext: "রিয়েল-টাইম বাজার দর ও MukiSoft ৯৮% কোয়ান্টিটেটিভ এআই ইঞ্জিন বিশ্লেষণে আজকের সেরা পজিশন"
+    };
+  }
+
+  // 2. After Midnight (12:00 AM) before Market Open (9:59 AM) on Trading Days
+  if (isTradingDay && mins < 600) {
+    return {
+      isLive: false,
+      cardTiming: "আজ সকাল ১০:০০টায় এন্ট্রি",
+      badge: "প্রি-মার্কেট প্রস্তুতি • আজ সকাল ১০:০০টায় লেনদেন শুরু",
+      headline: "আজ সকাল ১০:০০টায় বাই করার সেরা স্টকসমূহ",
+      subtext: "সর্বশেষ ক্লোজিং ডেটা বিশ্লেষণ করে আজ সকাল ১০:০০টায় মার্কেট ওপেনিংয়ে এন্ট্রির জন্য বাছাইকৃত তালিকা"
+    };
+  }
+
+  // 3. Weekend (Thursday after 2:30 PM, Friday, Saturday)
+  if (day === 5 || day === 6 || (day === 4 && mins > 870)) {
+    return {
+      isLive: false,
+      cardTiming: "আগামী রবিবার সকাল ১০:০০টায় এন্ট্রি",
+      badge: "সাপ্তাহিক মার্কেট বন্ধ • পরবর্তী সেশন রবিবার সকাল ১০:০০টা",
+      headline: "আগামী রবিবার সকাল ১০:০০টায় বাই করার সেরা স্টকসমূহ",
+      subtext: "সাপ্তাহিক ক্লোজিং ডেটা বিশ্লেষণ করে আগামী রবিবার সকাল ১০:০০টায় এন্ট্রির জন্য বাছাইকৃত তালিকা"
+    };
+  }
+
+  // 4. Trading Day Evening (After 2:30 PM to 11:59 PM, Sun-Wed)
+  return {
+    isLive: false,
+    cardTiming: "আগামীকাল সকাল ১০:০০টায় এন্ট্রি",
+    badge: "মার্কেট ক্লোজড • আগামীকাল সকাল ১০:০০টায় পরবর্তী সেশন",
+    headline: "আগামীকাল সকাল ১০:০০টায় বাই করার সেরা স্টকসমূহ",
+    subtext: "আজকের ক্লোজিং ডেটা বিশ্লেষণ করে আগামীকাল সকাল ১০:০০টায় এন্ট্রির জন্য বাছাইকৃত তালিকা"
+  };
+}
 
 document.addEventListener("DOMContentLoaded", () => {
   const menuBtn = document.getElementById("mobile-menu-btn");
@@ -108,19 +162,19 @@ async function loadDynamicTopPicks() {
   const grid = document.getElementById("dynamic-picks-grid");
   if (!grid) return;
 
+  // Apply smart BD timing immediately on page load
+  const timing = getSmartBDMarketTiming();
+  const badgeEl = document.getElementById("picks-session-badge");
+  const headEl = document.getElementById("picks-headline");
+  const subEl = document.getElementById("picks-subtext");
+  if (badgeEl) badgeEl.innerText = timing.badge;
+  if (headEl) headEl.innerText = timing.headline;
+  if (subEl) subEl.innerText = timing.subtext;
+
   try {
     const res = await fetch(`${API_BASE_URL}/api/top-picks`);
     if (!res.ok) throw new Error("Failed to load picks");
     const data = await res.json();
-
-    if (data.session) {
-      const badgeEl = document.getElementById("picks-session-badge");
-      const headEl = document.getElementById("picks-headline");
-      const subEl = document.getElementById("picks-subtext");
-      if (badgeEl) badgeEl.innerText = data.session.badge.replace(/[^\u0980-\u09FFa-zA-Z0-9\s:().•-]/g, "").trim();
-      if (headEl) headEl.innerText = data.session.headline;
-      if (subEl) subEl.innerText = data.session.subtext;
-    }
 
     const picks = data.picks || [];
     if (picks.length === 0) {
@@ -131,9 +185,6 @@ async function loadDynamicTopPicks() {
     grid.innerHTML = "";
     picks.forEach((item) => {
       const isPositive = item.change_pct >= 0;
-      const actionTiming = data.session.is_live
-        ? "এখনই এন্ট্রি জোন (Live)"
-        : "আগামীকাল সকাল ১০:০০টায় এন্ট্রি";
 
       const card = document.createElement("div");
       card.className = "bg-white border border-slate-200 hover:border-blue-600/50 rounded-2xl p-5 transition flex flex-col justify-between shadow-xs hover:shadow-md";
@@ -172,7 +223,7 @@ async function loadDynamicTopPicks() {
         </div>
 
         <div class="flex items-center justify-between pt-3 border-t border-slate-100">
-          <span class="text-[11px] text-blue-700 font-semibold">${actionTiming}</span>
+          <span class="text-[11px] text-blue-700 font-bold">${timing.cardTiming}</span>
           <a href="analyzer.html?symbol=${encodeURIComponent(item.symbol)}&exchange=DSE" class="text-xs font-bold bg-blue-700 hover:bg-blue-800 text-white px-3.5 py-1.5 rounded-lg transition">
             AI রিপোর্ট
           </a>
