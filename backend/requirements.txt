@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+xgboost
+joblib
+pandas
+numpy
+"bdshare[ta]"
+requests
+beautifulsoup4
