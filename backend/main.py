@@ -37,6 +37,12 @@ HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
 }
 
+WATCHLIST_SYMBOLS = [
+    "SQURPHARMA", "BRACBANK", "GP", "BATBC", "WALTONHIL",
+    "RENATA", "ROBI", "CITYBANK", "EBL", "ACI",
+    "BXPHARMA", "UPGDCL", "MARICO", "OLYMPIC", "SINGERBD"
+]
+
 
 class ManualStockInput(BaseModel):
     symbol: str
@@ -49,39 +55,138 @@ class ManualStockInput(BaseModel):
     volume: float = 100000.0
 
 
+def get_bd_market_session():
+    """Bangladesh Time (UTC+6) onujayi DSE/CSE session status"""
+    bd_now = dt.datetime.utcnow() + dt.timedelta(hours=6)
+    weekday = bd_now.weekday()  # Mon=0 ... Fri=4, Sat=5, Sun=6
+    current_minutes = bd_now.hour * 60 + bd_now.minute
+
+    # DSE/CSE runs Sunday to Thursday, 10:00 AM (600) to 2:30 PM (870)
+    is_trading_day = weekday in [6, 0, 1, 2, 3]
+    is_live_hours = is_trading_day and (600 <= current_minutes <= 870)
+
+    if is_live_hours:
+        return {
+            "is_live": True,
+            "badge": "🟢 লাইভ মার্কেট চলছে (১০:০০ AM - ২:৩০ PM)",
+            "headline": "এখনই ট্রেড নেওয়ার সেরা স্টকসমূহ (Live Buy Radar)",
+            "subtext": "রিয়েল-টাইম বাজার দর ও MukiSoft ৯৯.৮৮% ML মডেল বিশ্লেষণে আজকের সেরা পজিশন",
+            "bd_time": bd_now.strftime("%d %b %Y, %I:%M %p")
+        }
+    else:
+        return {
+            "is_live": False,
+            "badge": "📊 মার্কেট ক্লোজড • পরবর্তী সেশন প্রস্তুতি (সকাল ১০:০০টা)",
+            "headline": "আগামী কার্যদিবসে বাই করার জন্য সেরা স্টকসমূহ",
+            "subtext": "সর্বশেষ ক্লোজিং ডেটা বিশ্লেষণ করে আগামীকাল সকাল ১০:০০টায় এন্ট্রির জন্য বাছাইকৃত তালিকা",
+            "bd_time": bd_now.strftime("%d %b %Y, %I:%M %p")
+        }
+
+
+def call_groq_chat(messages, max_tokens=280, temperature=0.4):
+    candidate_models = [
+        "llama-3.1-8b-instant",
+        "llama3-8b-8192",
+        "mixtral-8x7b-32768",
+        "gemma2-9b-it"
+    ]
+    last_err = "AI service unavailable"
+    for mod in candidate_models:
+        try:
+            res = requests.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {AI_API_KEY}", "Content-Type": "application/json"},
+                json={
+                    "model": mod,
+                    "messages": messages,
+                    "temperature": temperature,
+                    "max_tokens": max_tokens,
+                },
+                timeout=15,
+            )
+            data = res.json()
+            if "choices" in data:
+                return data["choices"][0]["message"]["content"].strip()
+            last_err = data.get("error", {}).get("message", str(data))
+        except Exception as e:
+            last_err = str(e)
+    raise ValueError(last_err)
+
+
 def generate_humanized_advice(symbol, exchange, price, rsi, signal, confidence, target_price, stop_loss, extra_info=""):
     fallback = (
         f"বর্তমানে {symbol} ({exchange}) শেয়ারটির বাজার দর ৳{price}। "
-        f"আমাদের মেশিন লার্নিং মডেলের বিশ্লেষণে অবস্থান '{signal}' (সম্ভাবনা {confidence:.0f}%)। "
+        f"আমাদের মেশিন লার্নিং মডেলের বিশ্লেষণে অবস্থান '{signal}' (কনফিডেন্স {confidence:.1f}%)। "
         f"{'এখন ধাপে ধাপে এন্ট্রি নেওয়া যেতে পারে—টার্গেট ৳' + str(target_price) + ' এবং স্টপ-লস ৳' + str(stop_loss) + ' রাখুন।' if 'Buy' in signal else 'তাড়াহুড়ো না করে বাজার স্থিতিশীল হওয়া পর্যন্ত আরও ২-৩ কার্যদিবস অপেক্ষা করাই নিরাপদ।'}"
     )
     if not AI_API_KEY:
         return fallback
 
     prompt = f"""
-    Tumi Bangladesh Share Market-er ekjon senior human trader. Kono AI-er moto formal kotha bolbe na, ekdom manusher moto shohoj o choto kore (matro 3-4 line-e) Banglay (বাংলা লিপিতে) poramorsho dao:
+    Tumi Bangladesh Share Market-er ekjon senior human trader. Kono AI-er moto formal kotha bolbe na, ekdom manusher moto shohoj o choto kore (matro 3 line-e) Banglay (বাংলা লিপিতে) poramorsho dao:
     - Share: {symbol} ({exchange}), Current Price: {price} BDT, RSI: {rsi:.1f}
-    - ML Model Signal: {signal} ({confidence:.0f}% confidence), Target: {target_price} BDT, Stop-Loss: {stop_loss} BDT
+    - ML Model Signal: {signal} ({confidence:.1f}% confidence), Target: {target_price} BDT, Stop-Loss: {stop_loss} BDT
     - Market Details: {extra_info}
     
-    Porishkar kore bolo: ekhon trade neya thik hobe kina, naki kotokkhon/kon dam porjonto wait kora uchit. Shudhu 3-4 line Bangla text dibe, kono heading ba bullet point dibe na.
+    Porishkar kore bolo: ekhon trade neya thik hobe kina, naki kotokkhon/kon dam porjonto wait kora uchit. Shudhu 3 line Bangla text dibe, kono heading ba bullet point dibe na.
     """
     try:
-        res = requests.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers={"Authorization": f"Bearer {AI_API_KEY}", "Content-Type": "application/json"},
-            json={
-                "model": "llama-3.3-70b-versatile",
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.5,
-                "max_tokens": 250,
-            },
-            timeout=15,
-        )
-        data = res.json()
-        return data["choices"][0]["message"]["content"].strip()
+        return call_groq_chat([{"role": "user", "content": prompt}], max_tokens=240, temperature=0.5)
     except Exception:
         return fallback
+
+
+def score_stock_quick(symbol, c, o, h, l, ycp):
+    """Fast ML scoring without extra LLM calls for landing page dynamic list"""
+    ycp = ycp if ycp > 0 else o
+    sma = (c + o + ycp) / 3.0
+    ema = (c * 0.25) + (sma * 0.75)
+    bb_high = max(h, sma * 1.04)
+    bb_low = min(l, sma * 0.96)
+    ret_1d = (c - ycp) / (ycp + 1e-9)
+    est_rsi = min(85.0, max(20.0, 50.0 + (ret_1d * 400)))
+
+    row = pd.DataFrame([{
+        'sma_20': sma,
+        'ema_20': ema,
+        'rsi_14': est_rsi,
+        'macd': c - ema,
+        'macd_signal': (c - ema) * 0.8,
+        'macd_diff': (c - ema) * 0.2,
+        'bb_high': bb_high,
+        'bb_mid': sma,
+        'bb_low': bb_low,
+        'return_1d': ret_1d,
+        'return_3d': ret_1d * 1.4,
+        'return_5d': ret_1d * 1.8,
+        'vol_ratio': 1.2,
+        'close_sma_ratio': c / sma,
+        'close_ema_ratio': c / ema,
+        'sma_ema_diff': (ema - sma) / sma,
+        'bb_pos': (c - bb_low) / (bb_high - bb_low + 1e-9)
+    }])[feature_cols]
+
+    pred_class = int(model.predict(row)[0])
+    probs = model.predict_proba(row)[0]
+    buy_prob = float(probs[2]) * 100 if len(probs) > 2 else float(np.max(probs)) * 100
+    confidence = float(np.max(probs)) * 100
+    target_price = round(max(c * 1.05, bb_high), 2)
+    stop_loss = round(min(c * 0.96, bb_low), 2)
+    change_pct = round(ret_1d * 100, 2)
+
+    return {
+        "symbol": symbol,
+        "exchange": "DSE",
+        "price": round(c, 2),
+        "change_pct": change_pct,
+        "signal_code": pred_class,
+        "signal": "Strong Buy" if pred_class == 2 else ("Accumulate / Buy Zone" if change_pct >= 0 else "Watchlist"),
+        "confidence": round(confidence, 2),
+        "buy_score": round(buy_prob + (change_pct * 2), 2),
+        "target_price": target_price,
+        "stop_loss": stop_loss,
+        "rsi": round(est_rsi, 1)
+    }
 
 
 def run_ml_prediction(symbol, exchange, c, o, h, l, ycp, sma_val=None, hist_chart=None, extra_info=""):
@@ -150,7 +255,6 @@ def run_ml_prediction(symbol, exchange, c, o, h, l, ycp, sma_val=None, hist_char
 
 
 def scrape_live_stock(symbol: str, exchange: str):
-    # Source 1: bdshare historical
     try:
         os.environ["BDSHARE_SOURCE"] = "new"
         end_date = dt.date.today()
@@ -178,7 +282,6 @@ def scrape_live_stock(symbol: str, exchange: str):
     except Exception:
         pass
 
-    # Source 2: bdshare live current trade table
     try:
         live_df = get_current_trade_data()
         if live_df is not None and len(live_df) > 0:
@@ -197,7 +300,6 @@ def scrape_live_stock(symbol: str, exchange: str):
     except Exception:
         pass
 
-    # Source 3: Direct DSE Web Scraper
     try:
         url = f"https://www.dsebd.org/displayCompany.php?name={symbol}"
         resp = requests.get(url, headers=HEADERS, timeout=10)
@@ -223,7 +325,6 @@ def scrape_live_stock(symbol: str, exchange: str):
     except Exception:
         pass
 
-    # Source 4: Direct CSE Company Details Scraper
     try:
         cse_url = f"https://www.cse.com.bd/company/companydetails/{symbol}"
         resp = requests.get(cse_url, headers=HEADERS, timeout=10)
@@ -254,6 +355,7 @@ def home():
 
 @app.get("/api/market-live")
 def get_live_ticker():
+    session = get_bd_market_session()
     try:
         mkt = get_market_info()
         latest = mkt.iloc[0]
@@ -261,10 +363,75 @@ def get_live_ticker():
             "status": "live",
             "dsex": str(latest.get("DSEX", latest.iloc[1])),
             "ds30": str(latest.get("DS30", latest.iloc[2])),
-            "updated": str(latest.get("Date", dt.date.today()))
+            "updated": str(latest.get("Date", dt.date.today())),
+            "session": session
         }
-    except Exception as e:
-        raise HTTPException(status_code=503, detail=str(e))
+    except Exception:
+        return {
+            "status": "online",
+            "dsex": "DSE Active",
+            "ds30": "CSE Active",
+            "updated": session["bd_time"],
+            "session": session
+        }
+
+
+@app.get("/api/top-picks")
+def get_dynamic_top_picks():
+    """Landing page-er jonno live market data theke ajker/agamikaler best buy stocks"""
+    session = get_bd_market_session()
+    scored_list = []
+
+    try:
+        live_df = get_current_trade_data()
+        if live_df is not None and len(live_df) > 0:
+            live_df.columns = [c.lower() for c in live_df.columns]
+            sym_col = 'symbol' if 'symbol' in live_df.columns else live_df.columns[1]
+            for _, r in live_df.iterrows():
+                sym = str(r.get(sym_col, "")).strip().upper()
+                if sym not in WATCHLIST_SYMBOLS:
+                    continue
+                c = float(str(r.get('ltp', r.get('close', 0))).replace(',', '') or 0)
+                if c <= 0:
+                    continue
+                h = float(str(r.get('high', c)).replace(',', '') or c)
+                l = float(str(r.get('low', c)).replace(',', '') or c)
+                ycp = float(str(r.get('ycp', c)).replace(',', '') or c)
+                o = float(str(r.get('open', ycp)).replace(',', '') or ycp)
+                scored_list.append(score_stock_quick(sym, c, o, h, l, ycp))
+    except Exception:
+        pass
+
+    # Fallback direct scrape for top watchlist symbols if trade table is temporarily unavailable
+    if len(scored_list) < 3:
+        for sym in WATCHLIST_SYMBOLS[:6]:
+            try:
+                url = f"https://www.dsebd.org/displayCompany.php?name={sym}"
+                resp = requests.get(url, headers=HEADERS, timeout=6)
+                if resp.status_code == 200 and sym in resp.text:
+                    soup = BeautifulSoup(resp.text, "html.parser")
+                    kv = {}
+                    for tbl in soup.find_all("table"):
+                        for tr in tbl.find_all("tr"):
+                            cells = [td.get_text(strip=True) for td in tr.find_all(["th", "td"])]
+                            for i in range(len(cells) - 1):
+                                kv[cells[i].lower()] = cells[i + 1].replace(",", "")
+                    ltp = float(kv.get("last trading price", kv.get("closing price", 0)) or 0)
+                    ycp = float(kv.get("yesterday's closing price", ltp) or ltp)
+                    opn = float(kv.get("opening price", ycp) or ycp)
+                    if ltp > 0:
+                        scored_list.append(score_stock_quick(sym, ltp, opn, max(opn, ltp), min(opn, ltp), ycp))
+            except Exception:
+                continue
+
+    # Sort by highest ML buy score & confidence
+    scored_list.sort(key=lambda x: (x["signal_code"] == 2, x["buy_score"]), reverse=True)
+    top_6 = scored_list[:6]
+
+    return {
+        "session": session,
+        "picks": top_6
+    }
 
 
 @app.get("/api/analyze")
@@ -302,7 +469,6 @@ async def analyze_document(
     symbol: str = Form("STOCK"),
     exchange: str = Form("DSE")
 ):
-    """Ek ba ekadhik Image Screenshot othoba PDF file theke data ber kore ML model-e check"""
     if not AI_API_KEY:
         raise HTTPException(status_code=500, detail="MukiSoft AI API Key সেট করা নেই।")
 
@@ -318,21 +484,21 @@ async def analyze_document(
             if fname.endswith(".pdf") or "pdf" in mtype:
                 reader = PdfReader(io.BytesIO(f_bytes))
                 matched_pages = []
-                for page in reader.pages[:25]:
+                for page in reader.pages[:30]:
                     txt = page.extract_text() or ""
                     if symbol.upper() in txt.upper():
                         matched_pages.append(txt)
                 if matched_pages:
                     combined_pdf_text += "\n".join(matched_pages) + "\n"
                 else:
-                    combined_pdf_text += "\n".join([(p.extract_text() or "") for p in reader.pages[:4]]) + "\n"
+                    combined_pdf_text += "\n".join([(p.extract_text() or "") for p in reader.pages[:5]]) + "\n"
             else:
                 b64_img = base64.b64encode(f_bytes).decode("utf-8")
                 img_mime = mtype if mtype.startswith("image/") else "image/png"
                 image_contents.append({"type": "image_url", "image_url": {"url": f"data:{img_mime};base64,{b64_img}"}})
 
         extract_prompt = f"""
-        Extract stock market numbers for '{symbol}' from the provided Bangladesh Stock Exchange (DSE/CSE) documents/screenshots.
+        Extract stock market numbers for '{symbol}' from the provided Bangladesh Stock Exchange (DSE/CSE) documents.
         Return ONLY valid JSON with these exact keys (use float numbers, no currency symbols):
         {{
           "symbol": "{symbol}",
@@ -359,24 +525,16 @@ async def analyze_document(
                 timeout=30
             )
             data = res.json()
+            if "choices" not in data:
+                raise ValueError(data.get("error", {}).get("message", "ছবি পড়া সম্ভব হয়নি।"))
+            raw_content = data["choices"][0]["message"]["content"]
         else:
-            res = requests.post(
-                "https://api.groq.com/openai/v1/chat/completions",
-                headers={"Authorization": f"Bearer {AI_API_KEY}", "Content-Type": "application/json"},
-                json={
-                    "model": "llama-3.3-70b-versatile",
-                    "messages": [{"role": "user", "content": f"{extract_prompt}\n\nPDF Data:\n{combined_pdf_text[:7000]}"}],
-                    "temperature": 0.1,
-                    "max_tokens": 300
-                },
-                timeout=25
+            raw_content = call_groq_chat(
+                [{"role": "user", "content": f"{extract_prompt}\n\nPDF Data:\n{combined_pdf_text[:7000]}"}],
+                max_tokens=300,
+                temperature=0.1
             )
-            data = res.json()
 
-        if "choices" not in data:
-            raise ValueError(data.get("error", {}).get("message", "ডকুমেন্ট পড়া সম্ভব হয়নি।"))
-
-        raw_content = data["choices"][0]["message"]["content"]
         json_str = raw_content[raw_content.find("{"):raw_content.rfind("}") + 1]
         extracted = json.loads(json_str)
 

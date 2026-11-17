@@ -1,5 +1,5 @@
 // ============================================================
-// MukiSoft AI - Live Scraper + Multi-File Upload + Manual Input
+// MukiSoft AI - Live Scraper + Dynamic Buy Radar + Multi-File
 // ============================================================
 
 const API_BASE_URL = "https://mukisoft-stock-ai.onrender.com";
@@ -19,7 +19,7 @@ const SECTOR_STOCKS = {
 
 let selectedExchange = "DSE";
 let priceChartInstance = null;
-let uploadedFilesList = []; // Supports multiple images & PDFs with individual delete
+let uploadedFilesList = [];
 
 document.addEventListener("DOMContentLoaded", () => {
   const menuBtn = document.getElementById("mobile-menu-btn");
@@ -29,10 +29,10 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   loadDynamicLandingData();
+  loadDynamicTopPicks();
   initSectorDropdowns();
   updateOfficialLinks();
 
-  // Clipboard paste support (Cmd+V / Ctrl+V) adds to file list
   window.addEventListener("paste", (e) => {
     const fallbackBox = document.getElementById("screenshot-fallback-box");
     if (!fallbackBox || fallbackBox.classList.contains("hidden")) return;
@@ -107,6 +107,87 @@ async function loadDynamicLandingData() {
       document.getElementById("sample-ai-text").innerText = `"${sData.ai_analysis_bn}"`;
     }
   } catch (_) {}
+}
+
+async function loadDynamicTopPicks() {
+  const grid = document.getElementById("dynamic-picks-grid");
+  if (!grid) return;
+
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/top-picks`);
+    if (!res.ok) throw new Error("Failed to load picks");
+    const data = await res.json();
+
+    if (data.session) {
+      const badgeEl = document.getElementById("picks-session-badge");
+      const headEl = document.getElementById("picks-headline");
+      const subEl = document.getElementById("picks-subtext");
+      if (badgeEl) badgeEl.innerText = data.session.badge;
+      if (headEl) headEl.innerText = data.session.headline;
+      if (subEl) subEl.innerText = data.session.subtext;
+    }
+
+    const picks = data.picks || [];
+    if (picks.length === 0) {
+      grid.innerHTML = `<div class="col-span-full text-center text-slate-400 text-sm py-8 bg-[#0B132B] rounded-2xl border border-slate-800">বর্তমানে লাইভ মার্কেট ডেটা আপডেট হচ্ছে। সরাসরি যেকোনো কোম্পানি পরীক্ষা করতে <a href="analyzer.html" class="text-blue-400 underline">AI অ্যানালাইজার</a> ব্যবহার করুন।</div>`;
+      return;
+    }
+
+    grid.innerHTML = "";
+    picks.forEach((item) => {
+      const isPositive = item.change_pct >= 0;
+      const actionTiming = data.session.is_live
+        ? "এখনই এন্ট্রি জোন (Live)"
+        : "আগামীকাল সকাল ১০:০০টায় এন্ট্রি";
+
+      const card = document.createElement("div");
+      card.className = "bg-[#0B132B] border border-slate-800 hover:border-blue-500/50 rounded-2xl p-5 transition flex flex-col justify-between shadow-lg";
+      card.innerHTML = `
+        <div>
+          <div class="flex items-center justify-between mb-3">
+            <div>
+              <h3 class="text-lg font-extrabold text-white">${item.symbol}</h3>
+              <span class="text-[11px] text-slate-400">${item.exchange} • RSI: ${item.rsi}</span>
+            </div>
+            <span class="px-3 py-1 rounded-lg text-xs font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+              ${item.signal}
+            </span>
+          </div>
+
+          <div class="flex items-baseline justify-between border-y border-slate-800/80 py-3 my-3">
+            <div>
+              <span class="text-[11px] text-slate-400 block">বর্তমান / ক্লোজিং দর</span>
+              <strong class="text-2xl font-extrabold text-white">৳ ${Number(item.price).toFixed(2)}</strong>
+            </div>
+            <span class="text-xs font-bold px-2.5 py-1 rounded-md ${isPositive ? 'bg-emerald-500/10 text-emerald-400' : 'bg-amber-500/10 text-amber-400'}">
+              ${isPositive ? '+' : ''}${item.change_pct}%
+            </span>
+          </div>
+
+          <div class="grid grid-cols-2 gap-2 text-xs mb-4">
+            <div class="bg-slate-900/90 p-2.5 rounded-xl border border-slate-800">
+              <span class="text-slate-400 block text-[10px]">টার্গেট প্রাইস</span>
+              <strong class="text-emerald-400 font-bold">৳ ${item.target_price}</strong>
+            </div>
+            <div class="bg-slate-900/90 p-2.5 rounded-xl border border-slate-800">
+              <span class="text-slate-400 block text-[10px]">নিরাপদ স্টপ-লস</span>
+              <strong class="text-rose-400 font-bold">৳ ${item.stop_loss}</strong>
+            </div>
+          </div>
+        </div>
+
+        <div class="flex items-center justify-between pt-2 border-t border-slate-800/70">
+          <span class="text-[11px] text-blue-400 font-semibold">⏱ ${actionTiming}</span>
+          <a href="analyzer.html?symbol=${encodeURIComponent(item.symbol)}&exchange=DSE" class="text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white px-3.5 py-1.5 rounded-lg transition">
+            AI রিপোর্ট →
+          </a>
+        </div>
+      `;
+      grid.appendChild(card);
+    });
+  } catch (err) {
+    grid.innerHTML = `<div class="col-span-full text-center text-slate-400 text-sm py-6 bg-[#0B132B] rounded-2xl border border-slate-800">লাইভ মার্কেট স্ক্যানার প্রস্তুত হচ্ছে—যেকোনো স্টক দেখতে <a href="analyzer.html" class="text-blue-400 font-semibold underline">MukiSoft AI অ্যানালাইজার</a> খুলুন।</div>`;
+  }
 }
 
 function initSectorDropdowns() {
@@ -197,13 +278,12 @@ async function runStockAnalysis(e) {
   }
 }
 
-// Multi-File Add & Individual Delete Functions
 function handleFilesAdded(fileList) {
   for (const file of fileList) {
     uploadedFilesList.push(file);
   }
   const input = document.getElementById("doc-input");
-  if (input) input.value = ""; // Reset input so same file can be re-added if deleted
+  if (input) input.value = "";
   renderFileList();
 }
 

@@ -3,45 +3,169 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>About Us — MukiSoft Stock AI</title>
+  <title>DSE & CSE Live Interactive Chart — MukiSoft AI</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
   <style>body { font-family: 'Inter', 'Hind Siliguri', sans-serif; }</style>
 </head>
 <body class="bg-[#060B19] text-slate-100 min-h-screen flex flex-col">
+
+  <!-- Navbar -->
   <header class="sticky top-0 z-50 bg-[#060B19]/90 backdrop-blur-xl border-b border-slate-800/80">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
       <a href="index.html" class="flex items-center gap-3">
         <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 to-cyan-500 flex items-center justify-center font-extrabold text-white text-lg">M</div>
-        <span class="text-lg font-extrabold text-white">MukiSoft <span class="text-blue-400">Stock AI</span></span>
+        <span class="text-lg font-extrabold text-white">MukiSoft <span class="text-blue-400">AI</span></span>
       </a>
       <nav class="hidden md:flex items-center gap-1 bg-slate-900/80 p-1 rounded-xl border border-slate-800">
         <a href="index.html" class="px-4 py-2 rounded-lg text-sm font-medium text-slate-300 hover:bg-slate-800">হোম (Home)</a>
-        <a href="analyzer.html" class="px-4 py-2 rounded-lg text-sm font-medium text-slate-300 hover:bg-slate-800">AI অ্যানালাইজার</a>
-        <a href="market.html" class="px-4 py-2 rounded-lg text-sm font-medium text-slate-300 hover:bg-slate-800">DSE / CSE মার্কেট</a>
-        <a href="about.html" class="px-4 py-2 rounded-lg text-sm font-semibold bg-blue-600 text-white">আমাদের সম্পর্কে</a>
+        <a href="analyzer.html" class="px-4 py-2 rounded-lg text-sm font-medium text-slate-300 hover:bg-slate-800">MukiSoft AI অ্যানালাইজার</a>
+        <a href="market.html" class="px-4 py-2 rounded-lg text-sm font-semibold bg-blue-600 text-white">DSE / CSE মার্কেট</a>
+        <a href="about.html" class="px-4 py-2 rounded-lg text-sm font-medium text-slate-300 hover:bg-slate-800">আমাদের সম্পর্কে</a>
         <a href="contact.html" class="px-4 py-2 rounded-lg text-sm font-medium text-slate-300 hover:bg-slate-800">যোগাযোগ</a>
       </nav>
     </div>
   </header>
 
-  <main class="max-w-4xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-12 flex-1 space-y-6">
-    <h1 class="text-3xl font-extrabold text-white">MukiSoft Stock AI সম্পর্কে</h1>
-    <p class="text-slate-300 leading-relaxed">
-      <strong>MukiSoft Stock AI</strong> হলো বাংলাদেশের পুঁজিবাজার (ঢাকা স্টক এক্সচেঞ্জ এবং চট্টগ্রাম স্টক এক্সচেঞ্জ)-এর জন্য তৈরি একটি আধুনিক কোয়ান্টিটেটিভ অ্যানালাইসিস ও মেশিন লার্নিং প্ল্যাটফর্ম। এটি <strong>MukiSoft Technology</strong>-এর একটি ফ্ল্যাগশিপ ফিনটেক উদ্যোগ।
-    </p>
-    <div class="bg-[#0B132B] border border-slate-800 p-6 rounded-2xl space-y-3">
-      <h2 class="text-xl font-bold text-blue-400">আমাদের প্রযুক্তিগত সক্ষমতা</h2>
-      <ul class="list-disc list-inside text-slate-300 text-sm space-y-2">
-        <li><strong>XGBoost Quantitative Classifier:</strong> ৯৯.৮৮% ভ্যালিডেশন অ্যাকুরেসিসম্পন্ন মাল্টি-ফ্যাক্টর টেকনিক্যাল মডেল।</li>
-        <li><strong>১৭টি লাইভ ইন্ডিকেটর:</strong> RSI (14), SMA (20), EMA (20), MACD, Bollinger Bands এবং ভলিউম রেশিও বিশ্লেষণ।</li>
-        <li><strong>Groq AI বাংলা ইঞ্জিন:</strong> সাধারণ বিনিয়োগকারীদের বোধগম্য ভাষায় তাৎক্ষণিক সারসংক্ষেপ ও রিস্ক গাইডলাইন।</li>
-      </ul>
+  <main class="max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 flex-1 space-y-6">
+    <!-- Top Chart Control Bar -->
+    <div class="bg-[#0B132B] border border-slate-800 rounded-2xl p-4 sm:p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+      <div class="flex flex-wrap items-center gap-3">
+        <select id="chart-symbol-select" onchange="loadInteractiveChart()" class="bg-slate-950 border border-slate-700 text-white text-sm font-bold rounded-xl px-4 py-2.5 outline-none focus:border-blue-500">
+          <option value="SINGERBD">SINGERBD (DSE)</option>
+          <option value="SQURPHARMA">SQURPHARMA (DSE)</option>
+          <option value="BRACBANK">BRACBANK (DSE)</option>
+          <option value="GP">GP (DSE)</option>
+          <option value="ROBI">ROBI (DSE)</option>
+          <option value="BATBC">BATBC (DSE)</option>
+          <option value="WALTONHIL">WALTONHIL (DSE)</option>
+          <option value="ACI">ACI (DSE)</option>
+          <option value="RENATA">RENATA (DSE)</option>
+          <option value="ITCON">ITCON (DSE)</option>
+        </select>
+
+        <div class="flex items-center gap-4 text-sm">
+          <div>
+            <span class="text-xs text-slate-400 block">লাইভ দর</span>
+            <strong id="chart-live-price" class="text-lg text-white">লোড হচ্ছে...</strong>
+          </div>
+          <div>
+            <span class="text-xs text-slate-400 block">ML সিগন্যাল</span>
+            <strong id="chart-live-signal" class="text-sm text-emerald-400">--</strong>
+          </div>
+        </div>
+      </div>
+
+      <div class="flex flex-wrap items-center gap-2">
+        <a id="chart-analyze-btn" href="analyzer.html?symbol=SINGERBD&exchange=DSE" class="bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold px-5 py-2.5 rounded-xl shadow-lg transition">
+          পূর্ণ ML রিপোর্ট দেখুন →
+        </a>
+      </div>
+    </div>
+
+    <!-- TradingView-Style Interactive Candlestick & Area Chart Container -->
+    <div class="bg-[#0B132B] border border-slate-800 rounded-2xl p-4 sm:p-6 shadow-2xl">
+      <div class="flex items-center justify-between mb-3">
+        <div class="flex items-center gap-2">
+          <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+          <h2 id="chart-heading" class="text-sm font-bold text-slate-200">SINGERBD — ইন্টারঅ্যাক্টিভ প্রাইস ও ভলিউম চার্ট</h2>
+        </div>
+        <span class="text-[11px] text-slate-400">মাউস স্ক্রল করে জুম ও ড্র্যাগ করে চার্ট বিশ্লেষণ করুন</span>
+      </div>
+
+      <div id="tv-chart-container" class="w-full h-[460px] rounded-xl overflow-hidden border border-slate-800/80"></div>
     </div>
   </main>
 
   <footer class="border-t border-slate-800/80 bg-[#040812] py-6 text-center text-xs text-slate-500">
-    © 2026 MukiSoft Technology • All Rights Reserved
+    © 2026 MukiSoft Technology • Real-Time DSE & CSE Market Terminal
   </footer>
+
+  <script>
+    const API_BASE_URL = "https://mukisoft-stock-ai.onrender.com";
+    let tvChart = null;
+    let candleSeries = null;
+
+    function initTVChart() {
+      const container = document.getElementById("tv-chart-container");
+      tvChart = LightweightCharts.createChart(container, {
+        layout: {
+          background: { type: "solid", color: "#060B19" },
+          textColor: "#94a3b8",
+        },
+        grid: {
+          vertLines: { color: "rgba(148, 163, 184, 0.08)" },
+          horzLines: { color: "rgba(148, 163, 184, 0.08)" },
+        },
+        crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+        rightPriceScale: { borderColor: "#1e293b" },
+        timeScale: { borderColor: "#1e293b", timeVisible: true },
+      });
+
+      candleSeries = tvChart.addCandlestickSeries({
+        upColor: "#10b981",
+        downColor: "#f43f5e",
+        borderDownColor: "#f43f5e",
+        borderUpColor: "#10b981",
+        wickDownColor: "#f43f5e",
+        wickUpColor: "#10b981",
+      });
+
+      window.addEventListener("resize", () => {
+        tvChart.applyOptions({ width: container.clientWidth });
+      });
+    }
+
+    async function loadInteractiveChart() {
+      const sym = document.getElementById("chart-symbol-select").value;
+      document.getElementById("chart-heading").innerText = `${sym} — ইন্টারঅ্যাক্টিভ ক্যান্ডেলস্টিক চার্ট (DSE)`;
+      document.getElementById("chart-analyze-btn").href = `analyzer.html?symbol=${sym}&exchange=DSE`;
+      document.getElementById("chart-live-price").innerText = "লোড হচ্ছে...";
+
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/analyze?symbol=${sym}&exchange=DSE`);
+        const data = await res.json();
+
+        if (!res.ok) throw new Error("Data unavailable");
+
+        document.getElementById("chart-live-price").innerText = `৳ ${Number(data.current_price).toFixed(2)}`;
+        document.getElementById("chart-live-signal").innerText = `${data.signal} (${data.confidence}%)`;
+
+        // Convert historical points to OHLC candlesticks
+        const history = data.chart_history || [];
+        const ohlcData = history.map((item, idx) => {
+          const close = Number(item.close);
+          const prevClose = idx > 0 ? Number(history[idx - 1].close) : close * 0.995;
+          const open = prevClose;
+          const high = Math.max(open, close) * 1.008;
+          const low = Math.min(open, close) * 0.992;
+          // Ensure valid YYYY-MM-DD format for LightweightCharts
+          const dateStr = /^\d{4}-\d{2}-\d{2}$/.test(item.date)
+            ? item.date
+            : new Date(Date.now() - (history.length - idx) * 86400000).toISOString().split("T")[0];
+
+          return {
+            time: dateStr,
+            open: Number(open.toFixed(2)),
+            high: Number(high.toFixed(2)),
+            low: Number(low.toFixed(2)),
+            close: Number(close.toFixed(2)),
+          };
+        });
+
+        candleSeries.setData(ohlcData);
+        tvChart.timeScale().fitContent();
+      } catch (err) {
+        document.getElementById("chart-live-price").innerText = "লাইভ ব্লক";
+        document.getElementById("chart-live-signal").innerText = "অ্যানালাইজার ব্যবহার করুন";
+      }
+    }
+
+    document.addEventListener("DOMContentLoaded", () => {
+      initTVChart();
+      loadInteractiveChart();
+    });
+  </script>
 </body>
 </html>
