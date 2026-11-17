@@ -1,12 +1,12 @@
 // ============================================================
-// MukiSoft AI - Live Scraper First + Image/PDF Document Fallback
+// MukiSoft AI - Live Scraper + Multi-File Upload + Manual Input
 // ============================================================
 
 const API_BASE_URL = "https://mukisoft-stock-ai.onrender.com";
 
 const SECTOR_STOCKS = {
+  "Pharmaceuticals & Chemicals": ["ACI", "SQURPHARMA", "RENATA", "BXPHARMA", "ACMEPL", "BEACONPHAR", "ORIONPHARM", "IBNSINA"],
   "Bank": ["BRACBANK", "CITYBANK", "DUTCHBANGL", "EBL", "ISLAMIBANK", "PUBALIBANK", "PRIMEBANK", "MTB", "UCB"],
-  "Pharmaceuticals & Chemicals": ["SQURPHARMA", "RENATA", "BXPHARMA", "ACMEPL", "BEACONPHAR", "ORIONPHARM", "ACI", "IBNSINA"],
   "Telecommunication": ["GP", "ROBI", "BSCCL"],
   "Engineering": ["WALTONHIL", "BSRMSTEEL", "BSRMLTD", "GPHISPAT", "SINGERBD", "RUNNERAUTO", "BBSCABLES"],
   "Fuel & Power": ["UPGDCL", "SUMITPOWER", "MJLPBD", "JAMUNAOIL", "MPETROLEUM", "PADMAOIL", "LINDEBD", "POWERGRID"],
@@ -19,7 +19,7 @@ const SECTOR_STOCKS = {
 
 let selectedExchange = "DSE";
 let priceChartInstance = null;
-let selectedDocFile = null;
+let uploadedFilesList = []; // Supports multiple images & PDFs with individual delete
 
 document.addEventListener("DOMContentLoaded", () => {
   const menuBtn = document.getElementById("mobile-menu-btn");
@@ -30,18 +30,20 @@ document.addEventListener("DOMContentLoaded", () => {
 
   loadDynamicLandingData();
   initSectorDropdowns();
+  updateOfficialLinks();
 
-  // Clipboard paste support (Cmd+V / Ctrl+V)
+  // Clipboard paste support (Cmd+V / Ctrl+V) adds to file list
   window.addEventListener("paste", (e) => {
     const fallbackBox = document.getElementById("screenshot-fallback-box");
     if (!fallbackBox || fallbackBox.classList.contains("hidden")) return;
     const items = (e.clipboardData || e.originalEvent.clipboardData).items;
+    const pastedFiles = [];
     for (const item of items) {
       if (item.type.indexOf("image") !== -1) {
-        setDocumentPreview(item.getAsFile());
-        break;
+        pastedFiles.push(item.getAsFile());
       }
     }
+    if (pastedFiles.length > 0) handleFilesAdded(pastedFiles);
   });
 
   const params = new URLSearchParams(window.location.search);
@@ -51,10 +53,24 @@ document.addEventListener("DOMContentLoaded", () => {
     if (urlExchange) setExchange(urlExchange);
     if (urlSymbol) {
       document.getElementById("symbol-input").value = urlSymbol.toUpperCase();
+      updateOfficialLinks();
       runStockAnalysis();
     }
   }
 });
+
+function updateOfficialLinks() {
+  const input = document.getElementById("symbol-input");
+  if (!input) return;
+  const sym = input.value.trim().toUpperCase() || "ACI";
+  const dseLink = document.getElementById("dse-direct-link");
+  const cseLink = document.getElementById("cse-direct-link");
+  const label = document.getElementById("fallback-symbol-label");
+
+  if (dseLink) dseLink.href = `https://www.dse.com.bd/company/${encodeURIComponent(sym)}`;
+  if (cseLink) cseLink.href = `https://www.cse.com.bd/company/companydetails/${encodeURIComponent(sym)}`;
+  if (label) label.innerText = `${sym} (${selectedExchange})`;
+}
 
 async function loadDynamicLandingData() {
   const dsexEl = document.getElementById("live-dsex");
@@ -121,6 +137,7 @@ function initSectorDropdowns() {
   stockSelect.addEventListener("change", () => {
     if (stockSelect.value && symbolInput) {
       symbolInput.value = stockSelect.value;
+      updateOfficialLinks();
     }
   });
 
@@ -140,6 +157,7 @@ function setExchange(ex) {
     cseBtn.className = "px-5 py-2.5 rounded-lg text-sm font-bold bg-blue-600 text-white shadow-lg transition";
     dseBtn.className = "px-5 py-2.5 rounded-lg text-sm font-bold text-slate-400 hover:text-white transition";
   }
+  updateOfficialLinks();
 }
 
 async function runStockAnalysis(e) {
@@ -147,12 +165,13 @@ async function runStockAnalysis(e) {
   const symbol = document.getElementById("symbol-input").value.trim().toUpperCase();
   if (!symbol) return;
 
+  updateOfficialLinks();
+
   const loader = document.getElementById("loader-box");
   const fallbackBox = document.getElementById("screenshot-fallback-box");
   const resultBox = document.getElementById("result-dashboard");
   const submitBtn = document.getElementById("submit-btn");
 
-  // Always hide upload box first and try live scraping
   fallbackBox.classList.add("hidden");
   resultBox.classList.add("hidden");
   document.getElementById("loader-text").innerText = `${symbol} (${selectedExchange})-এর রিয়েল-টাইম ডেটা স্ক্র্যাপ করা হচ্ছে...`;
@@ -172,54 +191,77 @@ async function runStockAnalysis(e) {
     resultBox.classList.remove("hidden");
   } catch (err) {
     loader.classList.add("hidden");
-    document.getElementById("fallback-symbol-label").innerText = `${symbol} (${selectedExchange})`;
-    document.getElementById("dse-direct-link").href = `https://www.dse.com.bd/company/${encodeURIComponent(symbol)}`;
-    document.getElementById("cse-direct-link").href = `https://www.cse.com.bd/market/current_price`;
     fallbackBox.classList.remove("hidden");
   } finally {
     submitBtn.disabled = false;
   }
 }
 
-function previewDocument(input) {
-  if (input.files && input.files[0]) {
-    setDocumentPreview(input.files[0]);
+// Multi-File Add & Individual Delete Functions
+function handleFilesAdded(fileList) {
+  for (const file of fileList) {
+    uploadedFilesList.push(file);
   }
+  const input = document.getElementById("doc-input");
+  if (input) input.value = ""; // Reset input so same file can be re-added if deleted
+  renderFileList();
 }
 
-function setDocumentPreview(file) {
-  selectedDocFile = file;
-  const img = document.getElementById("screenshot-preview");
-  const pdfBadge = document.getElementById("pdf-preview-badge");
-  const placeholder = document.getElementById("upload-placeholder");
+function removeFileAtIndex(idx) {
+  uploadedFilesList.splice(idx, 1);
+  renderFileList();
+}
 
-  placeholder.classList.add("hidden");
-  img.classList.add("hidden");
-  pdfBadge.classList.add("hidden");
+function renderFileList() {
+  const container = document.getElementById("file-list-container");
+  if (!container) return;
 
-  if (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) {
-    pdfBadge.innerText = `📄 PDF সংযুক্ত হয়েছে: ${file.name}`;
-    pdfBadge.classList.remove("hidden");
-  } else {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      img.src = e.target.result;
-      img.classList.remove("hidden");
-    };
-    reader.readAsDataURL(file);
+  if (uploadedFilesList.length === 0) {
+    container.classList.add("hidden");
+    container.innerHTML = "";
+    return;
   }
+
+  container.classList.remove("hidden");
+  container.innerHTML = "";
+
+  uploadedFilesList.forEach((file, index) => {
+    const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+    const card = document.createElement("div");
+    card.className = "flex items-center justify-between gap-2 bg-slate-900 border border-slate-700 rounded-xl p-3";
+
+    const info = document.createElement("div");
+    info.className = "flex items-center gap-2.5 overflow-hidden";
+    info.innerHTML = `
+      <span class="text-lg shrink-0">${isPdf ? "📄" : "🖼️"}</span>
+      <span class="text-xs text-slate-200 font-medium truncate">${file.name}</span>
+    `;
+
+    const delBtn = document.createElement("button");
+    delBtn.type = "button";
+    delBtn.innerText = "✕";
+    delBtn.title = "ফাইলটি ডিলিট করুন";
+    delBtn.className = "w-7 h-7 rounded-lg bg-rose-500/20 hover:bg-rose-500 text-rose-300 hover:text-white text-xs font-bold shrink-0 transition cursor-pointer";
+    delBtn.onclick = () => removeFileAtIndex(index);
+
+    card.appendChild(info);
+    card.appendChild(delBtn);
+    container.appendChild(card);
+  });
 }
 
 async function runDocumentAnalysis(e) {
   e.preventDefault();
-  if (!selectedDocFile) {
-    alert("অনুগ্রহ করে একটি স্ক্রিনশট (Image) অথবা PDF ফাইল সিলেক্ট করুন।");
+  if (uploadedFilesList.length === 0) {
+    alert("অনুগ্রহ করে অন্তত একটি স্ক্রিনশট (Image) অথবা PDF ফাইল যোগ করুন।");
     return;
   }
 
   const symbol = document.getElementById("symbol-input").value.trim().toUpperCase() || "STOCK";
   const formData = new FormData();
-  formData.append("file", selectedDocFile);
+  uploadedFilesList.forEach((file) => {
+    formData.append("files", file);
+  });
   formData.append("symbol", symbol);
   formData.append("exchange", selectedExchange);
 
@@ -228,7 +270,7 @@ async function runDocumentAnalysis(e) {
   const btn = document.getElementById("doc-submit-btn");
 
   resultBox.classList.add("hidden");
-  document.getElementById("loader-text").innerText = "MukiSoft AI ফাইল থেকে ডেটা পড়ে বিশ্লেষণ করছে...";
+  document.getElementById("loader-text").innerText = `${uploadedFilesList.length}টি ফাইল থেকে MukiSoft AI বিশ্লেষণ করছে...`;
   loader.classList.remove("hidden");
   btn.disabled = true;
 
@@ -251,6 +293,39 @@ async function runDocumentAnalysis(e) {
     alert(err.message);
   } finally {
     btn.disabled = false;
+  }
+}
+
+async function runManualAnalysis(e) {
+  e.preventDefault();
+  const symbol = document.getElementById("symbol-input").value.trim().toUpperCase() || "STOCK";
+  const payload = {
+    symbol: symbol,
+    exchange: selectedExchange,
+    open_price: parseFloat(document.getElementById("m-open").value),
+    high_price: parseFloat(document.getElementById("m-high").value),
+    low_price: parseFloat(document.getElementById("m-low").value),
+    close_price: parseFloat(document.getElementById("m-close").value),
+    yesterday_close: parseFloat(document.getElementById("m-ycp").value) || 0
+  };
+
+  const loader = document.getElementById("loader-box");
+  const resultBox = document.getElementById("result-dashboard");
+  loader.classList.remove("hidden");
+
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/analyze-manual`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    renderDashboard(data);
+    loader.classList.add("hidden");
+    resultBox.classList.remove("hidden");
+  } catch (err) {
+    loader.classList.add("hidden");
+    alert("সার্ভারের সাথে সংযোগ হচ্ছে না। একটু পর আবার চেষ্টা করুন।");
   }
 }
 
