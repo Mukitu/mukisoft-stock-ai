@@ -1,5 +1,5 @@
 // ============================================================
-// MukiSoft AI - Live Auto-Fetch + 1-Click Screenshot AI Engine
+// MukiSoft AI - Live Scraper First + Image/PDF Document Fallback
 // ============================================================
 
 const API_BASE_URL = "https://mukisoft-stock-ai.onrender.com";
@@ -19,7 +19,7 @@ const SECTOR_STOCKS = {
 
 let selectedExchange = "DSE";
 let priceChartInstance = null;
-let selectedScreenshotFile = null;
+let selectedDocFile = null;
 
 document.addEventListener("DOMContentLoaded", () => {
   const menuBtn = document.getElementById("mobile-menu-btn");
@@ -31,15 +31,14 @@ document.addEventListener("DOMContentLoaded", () => {
   loadDynamicLandingData();
   initSectorDropdowns();
 
-  // Support direct clipboard image paste (Cmd+V / Ctrl+V) anywhere on analyzer page
+  // Clipboard paste support (Cmd+V / Ctrl+V)
   window.addEventListener("paste", (e) => {
     const fallbackBox = document.getElementById("screenshot-fallback-box");
     if (!fallbackBox || fallbackBox.classList.contains("hidden")) return;
     const items = (e.clipboardData || e.originalEvent.clipboardData).items;
     for (const item of items) {
       if (item.type.indexOf("image") !== -1) {
-        const file = item.getAsFile();
-        setScreenshotPreview(file);
+        setDocumentPreview(item.getAsFile());
         break;
       }
     }
@@ -74,14 +73,8 @@ async function loadDynamicLandingData() {
         ds30El.innerText = mkt.ds30;
       }
       if (updEl) updEl.innerText = mkt.updated;
-    } else {
-      dsexEl.innerText = "DSE Live";
-      if (ds30El) ds30El.innerText = "CSE Live";
     }
-  } catch (_) {
-    dsexEl.innerText = "DSE Online";
-    if (ds30El) ds30El.innerText = "CSE Online";
-  }
+  } catch (_) {}
 
   const sigEl = document.getElementById("sample-signal");
   try {
@@ -96,18 +89,8 @@ async function loadDynamicLandingData() {
         sigEl.innerText = `${sData.signal} • ${sData.confidence}%`;
       }
       document.getElementById("sample-ai-text").innerText = `"${sData.ai_analysis_bn}"`;
-    } else if (sigEl) {
-      sigEl.classList.remove("animate-pulse");
-      sigEl.innerText = "টার্মিনাল প্রস্তুত";
-      document.getElementById("sample-ai-text").innerText =
-        "যেকোনো শেয়ারের বিশ্লেষণ দেখতে উপরের সার্চ বক্সে কোম্পানির কোড লিখে 'বিশ্লেষণ দেখুন' বাটনে ক্লিক করুন।";
     }
-  } catch (_) {
-    if (sigEl) {
-      sigEl.classList.remove("animate-pulse");
-      sigEl.innerText = "টার্মিনাল প্রস্তুত";
-    }
-  }
+  } catch (_) {}
 }
 
 function initSectorDropdowns() {
@@ -169,9 +152,10 @@ async function runStockAnalysis(e) {
   const resultBox = document.getElementById("result-dashboard");
   const submitBtn = document.getElementById("submit-btn");
 
+  // Always hide upload box first and try live scraping
   fallbackBox.classList.add("hidden");
   resultBox.classList.add("hidden");
-  document.getElementById("loader-text").innerText = "লাইভ মার্কেট ডেটা ও MukiSoft AI বিশ্লেষণ চলছে...";
+  document.getElementById("loader-text").innerText = `${symbol} (${selectedExchange})-এর রিয়েল-টাইম ডেটা স্ক্র্যাপ করা হচ্ছে...`;
   loader.classList.remove("hidden");
   submitBtn.disabled = true;
 
@@ -180,7 +164,7 @@ async function runStockAnalysis(e) {
     const data = await res.json();
 
     if (!res.ok) {
-      throw new Error(data.detail || "Auto-fetch failed");
+      throw new Error(data.detail || "Live scrape failed");
     }
 
     renderDashboard(data);
@@ -188,66 +172,75 @@ async function runStockAnalysis(e) {
     resultBox.classList.remove("hidden");
   } catch (err) {
     loader.classList.add("hidden");
-    // Dynamic company link for DSE & CSE
     document.getElementById("fallback-symbol-label").innerText = `${symbol} (${selectedExchange})`;
     document.getElementById("dse-direct-link").href = `https://www.dse.com.bd/company/${encodeURIComponent(symbol)}`;
-    document.getElementById("cse-direct-link").href = `https://www.cse.com.bd/company/companydetails/${encodeURIComponent(symbol)}`;
+    document.getElementById("cse-direct-link").href = `https://www.cse.com.bd/market/current_price`;
     fallbackBox.classList.remove("hidden");
   } finally {
     submitBtn.disabled = false;
   }
 }
 
-function previewScreenshot(input) {
+function previewDocument(input) {
   if (input.files && input.files[0]) {
-    setScreenshotPreview(input.files[0]);
+    setDocumentPreview(input.files[0]);
   }
 }
 
-function setScreenshotPreview(file) {
-  selectedScreenshotFile = file;
-  const reader = new FileReader();
-  reader.onload = (e) => {
-    const img = document.getElementById("screenshot-preview");
-    const placeholder = document.getElementById("upload-placeholder");
-    img.src = e.target.result;
-    img.classList.remove("hidden");
-    placeholder.classList.add("hidden");
-  };
-  reader.readAsDataURL(file);
+function setDocumentPreview(file) {
+  selectedDocFile = file;
+  const img = document.getElementById("screenshot-preview");
+  const pdfBadge = document.getElementById("pdf-preview-badge");
+  const placeholder = document.getElementById("upload-placeholder");
+
+  placeholder.classList.add("hidden");
+  img.classList.add("hidden");
+  pdfBadge.classList.add("hidden");
+
+  if (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) {
+    pdfBadge.innerText = `📄 PDF সংযুক্ত হয়েছে: ${file.name}`;
+    pdfBadge.classList.remove("hidden");
+  } else {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      img.src = e.target.result;
+      img.classList.remove("hidden");
+    };
+    reader.readAsDataURL(file);
+  }
 }
 
-async function runScreenshotAnalysis(e) {
+async function runDocumentAnalysis(e) {
   e.preventDefault();
-  if (!selectedScreenshotFile) {
-    alert("অনুগ্রহ করে প্রথমে একটি স্ক্রিনশট সিলেক্ট বা পেস্ট (Cmd+V / Ctrl+V) করুন।");
+  if (!selectedDocFile) {
+    alert("অনুগ্রহ করে একটি স্ক্রিনশট (Image) অথবা PDF ফাইল সিলেক্ট করুন।");
     return;
   }
 
   const symbol = document.getElementById("symbol-input").value.trim().toUpperCase() || "STOCK";
   const formData = new FormData();
-  formData.append("file", selectedScreenshotFile);
+  formData.append("file", selectedDocFile);
   formData.append("symbol", symbol);
   formData.append("exchange", selectedExchange);
 
   const loader = document.getElementById("loader-box");
   const resultBox = document.getElementById("result-dashboard");
-  const btn = document.getElementById("screenshot-submit-btn");
+  const btn = document.getElementById("doc-submit-btn");
 
   resultBox.classList.add("hidden");
-  document.getElementById("loader-text").innerText = "MukiSoft Vision AI স্ক্রিনশট থেকে ডেটা পড়ে বিশ্লেষণ করছে...";
+  document.getElementById("loader-text").innerText = "MukiSoft AI ফাইল থেকে ডেটা পড়ে বিশ্লেষণ করছে...";
   loader.classList.remove("hidden");
   btn.disabled = true;
 
   try {
-    const res = await fetch(`${API_BASE_URL}/api/analyze-screenshot`, {
+    const res = await fetch(`${API_BASE_URL}/api/analyze-document`, {
       method: "POST",
       body: formData
     });
     const data = await res.json();
 
     if (!res.ok) {
-      throw new Error(data.detail || "স্ক্রিনশট বিশ্লেষণ করা যায়নি।");
+      throw new Error(data.detail || "বিশ্লেষণ করা যায়নি।");
     }
 
     renderDashboard(data);
