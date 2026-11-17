@@ -3,210 +3,250 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>MukiSoft AI — DSE & CSE Quantitative Intelligence</title>
+  <title>MukiSoft AI — DSE & CSE Quantitative Stock Intelligence</title>
+  <link rel="icon" type="image/svg+xml" href="assets/logo.svg" />
   <script src="https://cdn.tailwindcss.com"></script>
   <link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <style>body { font-family: 'Inter', 'Hind Siliguri', sans-serif; }</style>
+  <style>
+    body { font-family: 'Inter', 'Hind Siliguri', sans-serif; }
+  </style>
 </head>
-<body class="bg-[#060B19] text-slate-100 antialiased selection:bg-blue-600 selection:text-white">
+<body class="bg-white text-slate-900 antialiased selection:bg-blue-700 selection:text-white">
 
-  <!-- Top Live Market Ticker Bar -->
-  <div class="bg-[#0B132B] border-b border-slate-800/80 text-xs py-2 px-4 overflow-hidden">
-    <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-4 text-slate-300">
+  <!-- Top Institutional Market Strip -->
+  <div class="bg-slate-900 text-slate-200 text-xs py-2 px-4 border-b border-slate-800">
+    <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-4">
       <div class="flex items-center gap-6">
-        <span id="session-top-badge" class="flex items-center gap-1.5 font-semibold text-emerald-400">
-          <span class="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span> MUKISOFT AI ENGINE LIVE
+        <span class="flex items-center gap-2 font-semibold text-emerald-400">
+          <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+          <span id="session-top-badge">MUKISOFT AI ENGINE ACTIVE</span>
         </span>
-        <span>DSEX: <strong id="live-dsex" class="text-white animate-pulse">লোড হচ্ছে...</strong></span>
-        <span class="hidden sm:inline">DS30: <strong id="live-ds30" class="text-white animate-pulse">লোড হচ্ছে...</strong></span>
-        <span class="hidden md:inline">সময় (BD): <strong id="live-updated" class="text-blue-400">--</strong></span>
+        <span class="text-slate-300">DSEX: <strong id="live-dsex" class="text-white font-bold">লোড হচ্ছে...</strong></span>
+        <span class="hidden sm:inline text-slate-300">DS30: <strong id="live-ds30" class="text-white font-bold">লোড হচ্ছে...</strong></span>
+        <span class="hidden md:inline text-slate-400">সময় (BST): <strong id="live-updated" class="text-sky-300">--</strong></span>
       </div>
-      <div class="text-slate-400 hidden lg:block">Powered by MukiSoft AI • 99.88% Quantitative Engine</div>
+      <div class="hidden lg:flex items-center gap-4 text-slate-400 font-medium">
+        <span>99.88% Model Validation Accuracy</span>
+        <span>|</span>
+        <span>Dhaka & Chittagong Stock Exchange</span>
+      </div>
     </div>
   </div>
 
-  <!-- Main Navigation Bar -->
-  <header class="sticky top-0 z-50 bg-[#060B19]/90 backdrop-blur-xl border-b border-slate-800/80">
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-      <a href="index.html" class="flex items-center gap-3">
-        <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 to-cyan-500 flex items-center justify-center font-extrabold text-white text-lg shadow-lg shadow-blue-600/25">M</div>
-        <div>
-          <span class="text-lg font-extrabold tracking-tight text-white">MukiSoft <span class="text-blue-400">AI</span></span>
-          <span class="block text-[10px] text-slate-400 uppercase tracking-widest">DSE & CSE Analytics</span>
-        </div>
+  <!-- Main Navigation Header -->
+  <header class="sticky top-0 z-50 bg-white/95 backdrop-blur-md border-b border-slate-200/90 shadow-xs">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-18 py-3 flex items-center justify-between">
+      <a href="index.html" class="flex items-center">
+        <img src="assets/logo.svg" alt="MukiSoft AI" class="h-11 w-auto" />
       </a>
 
-      <nav class="hidden md:flex items-center gap-1 bg-slate-900/80 p-1 rounded-xl border border-slate-800">
-        <a href="index.html" class="px-4 py-2 rounded-lg text-sm font-semibold bg-blue-600 text-white">হোম (Home)</a>
-        <a href="analyzer.html" class="px-4 py-2 rounded-lg text-sm font-medium text-slate-300 hover:text-white hover:bg-slate-800 transition">MukiSoft AI অ্যানালাইজার</a>
-        <a href="market.html" class="px-4 py-2 rounded-lg text-sm font-medium text-slate-300 hover:text-white hover:bg-slate-800 transition">DSE / CSE মার্কেট</a>
-        <a href="about.html" class="px-4 py-2 rounded-lg text-sm font-medium text-slate-300 hover:text-white hover:bg-slate-800 transition">আমাদের সম্পর্কে</a>
-        <a href="contact.html" class="px-4 py-2 rounded-lg text-sm font-medium text-slate-300 hover:text-white hover:bg-slate-800 transition">যোগাযোগ</a>
+      <nav class="hidden md:flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200/80">
+        <a href="index.html" class="px-4 py-2 rounded-lg text-sm font-semibold bg-white text-blue-700 shadow-xs">হোম (Home)</a>
+        <a href="analyzer.html" class="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:text-slate-900 hover:bg-white/60 transition">AI অ্যানালাইজার</a>
+        <a href="market.html" class="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:text-slate-900 hover:bg-white/60 transition">DSE / CSE মার্কেট</a>
+        <a href="about.html" class="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:text-slate-900 hover:bg-white/60 transition">আমাদের সম্পর্কে</a>
+        <a href="contact.html" class="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:text-slate-900 hover:bg-white/60 transition">যোগাযোগ</a>
       </nav>
 
       <div class="hidden md:flex items-center gap-3">
-        <a href="analyzer.html" class="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-sm font-bold px-5 py-2.5 rounded-xl shadow-lg shadow-blue-600/25 transition">
-          ফ্রি স্টক চেক করুন →
+        <a href="analyzer.html" class="bg-blue-700 hover:bg-blue-800 text-white text-sm font-semibold px-5 py-2.5 rounded-xl shadow-sm transition inline-flex items-center gap-2">
+          <span>টার্মিনাল ওপেন করুন</span>
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3"/></svg>
         </a>
       </div>
 
-      <button id="mobile-menu-btn" class="md:hidden p-2 rounded-lg bg-slate-900 border border-slate-800 text-slate-300">☰</button>
+      <button id="mobile-menu-btn" class="md:hidden p-2 rounded-lg bg-slate-100 border border-slate-200 text-slate-700">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5"/></svg>
+      </button>
     </div>
 
-    <div id="mobile-menu" class="hidden md:hidden bg-[#0B132B] border-b border-slate-800 px-4 py-4 space-y-2">
-      <a href="index.html" class="block px-4 py-2 rounded-lg bg-blue-600 text-white font-semibold">হোম</a>
-      <a href="analyzer.html" class="block px-4 py-2 rounded-lg text-slate-300 hover:bg-slate-800">MukiSoft AI অ্যানালাইজার</a>
-      <a href="market.html" class="block px-4 py-2 rounded-lg text-slate-300 hover:bg-slate-800">DSE / CSE মার্কেট</a>
-      <a href="about.html" class="block px-4 py-2 rounded-lg text-slate-300 hover:bg-slate-800">আমাদের সম্পর্কে</a>
-      <a href="contact.html" class="block px-4 py-2 rounded-lg text-slate-300 hover:bg-slate-800">যোগাযোগ</a>
+    <!-- Mobile Menu -->
+    <div id="mobile-menu" class="hidden md:hidden bg-white border-b border-slate-200 px-4 py-4 space-y-2">
+      <a href="index.html" class="block px-4 py-2.5 rounded-lg bg-blue-50 text-blue-700 font-semibold">হোম (Home)</a>
+      <a href="analyzer.html" class="block px-4 py-2.5 rounded-lg text-slate-700 hover:bg-slate-50">AI অ্যানালাইজার</a>
+      <a href="market.html" class="block px-4 py-2.5 rounded-lg text-slate-700 hover:bg-slate-50">DSE / CSE মার্কেট</a>
+      <a href="about.html" class="block px-4 py-2.5 rounded-lg text-slate-700 hover:bg-slate-50">আমাদের সম্পর্কে</a>
+      <a href="contact.html" class="block px-4 py-2.5 rounded-lg text-slate-700 hover:bg-slate-50">যোগাযোগ</a>
     </div>
   </header>
 
   <!-- Hero Section -->
-  <section class="relative overflow-hidden py-12 lg:py-16 border-b border-slate-800/70">
-    <div class="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-blue-900/25 via-[#060B19] to-[#060B19] -z-10"></div>
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 grid lg:grid-cols-12 gap-10 items-center">
+  <section class="relative bg-gradient-to-b from-slate-50 via-white to-white py-14 lg:py-20 border-b border-slate-200/80">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 grid lg:grid-cols-12 gap-12 items-center">
       
-      <div class="lg:col-span-7 space-y-5">
-        <div class="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-blue-500/10 border border-blue-500/30 text-blue-400 text-xs font-semibold">
-          <span>🇧🇩 বাংলাদেশের প্রথম কোয়ান্টিটেটিভ MukiSoft AI শেয়ার মার্কেট প্ল্যাটফর্ম</span>
+      <div class="lg:col-span-7 space-y-6">
+        <div class="inline-flex items-center gap-2.5 px-3.5 py-1.5 rounded-full bg-blue-50 border border-blue-200 text-blue-800 text-xs font-bold">
+          <span class="w-2 h-2 rounded-full bg-blue-700"></span>
+          <span>৯৯.৮৮% অ্যাকুরেট মেশিন লার্নিং মডেল • DSE ও CSE কোয়ান্টিটেটিভ প্ল্যাটফর্ম</span>
         </div>
 
-        <h1 class="text-3xl sm:text-5xl font-extrabold text-white leading-tight">
-          গুজবে নয়, <span class="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-cyan-400">ডেটা ও MukiSoft AI বিশ্লেষণে</span> বিনিয়োগ করুন DSE ও CSE-তে
+        <h1 class="text-3xl sm:text-5xl font-extrabold text-slate-900 leading-[1.18] tracking-tight">
+          গুজবে নয়, <span class="text-blue-700">ডেটা ও MukiSoft AI বিশ্লেষণে</span> বিনিয়োগ করুন DSE ও CSE-তে
         </h1>
 
-        <p class="text-slate-300 text-base sm:text-lg leading-relaxed max-w-2xl">
-          ঢাকা ও চট্টগ্রাম স্টক এক্সচেঞ্জের যেকোনো শেয়ার কেনার আগে আমাদের মেশিন লার্নিং মডেল দিয়ে যাচাই করুন। রিয়েল-টাইম মার্কেট ডেটা বিশ্লেষণ করে MukiSoft AI আপনাকে সহজ বাংলায় বলে দেবে এখন ট্রেড নেওয়া ঠিক হবে নাকি অপেক্ষা করা উচিত।
+        <p class="text-slate-600 text-base sm:text-lg leading-relaxed max-w-2xl">
+          ঢাকা ও চট্টগ্রাম স্টক এক্সচেঞ্জের যেকোনো শেয়ার কেনার আগে আমাদের <strong class="text-slate-900">৯৯.৮৮% ভ্যালিডেটেড অ্যাকুরেসি</strong> সম্পন্ন মেশিন লার্নিং ইঞ্জিন দিয়ে যাচাই করুন। রিয়েল-টাইম ১৭টি টেকনিক্যাল ইন্ডিকেটর বিশ্লেষণ করে MukiSoft AI আপনাকে সহজ বাংলায় বলে দেবে এখন এন্ট্রি নেওয়া নিরাপদ কি না।
         </p>
 
-        <form action="analyzer.html" method="GET" class="flex flex-col sm:flex-row gap-3 pt-2 max-w-xl">
-          <select name="exchange" class="bg-slate-900 border border-slate-700 text-white text-sm font-bold rounded-xl px-4 py-3.5 outline-none focus:border-blue-500">
+        <!-- Search Form -->
+        <form action="analyzer.html" method="GET" class="flex flex-col sm:flex-row gap-3 pt-1 max-w-xl">
+          <select name="exchange" class="bg-white border border-slate-300 text-slate-900 text-sm font-bold rounded-xl px-4 py-3.5 outline-none focus:border-blue-700 focus:ring-2 focus:ring-blue-700/15 shadow-xs">
             <option value="DSE">DSE (ঢাকা)</option>
             <option value="CSE">CSE (চট্টগ্রাম)</option>
           </select>
-          <input type="text" name="symbol" required placeholder="কোম্পানির কোড লিখুন (যেমন: SQURPHARMA, GP)" class="flex-1 bg-slate-900 border border-slate-700 text-white text-sm rounded-xl px-4 py-3.5 outline-none focus:border-blue-500 uppercase" />
-          <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white font-bold px-6 py-3.5 rounded-xl shadow-lg shadow-blue-600/25 transition whitespace-nowrap">
+          <input type="text" name="symbol" required placeholder="কোম্পানির কোড লিখুন (যেমন: SQURPHARMA, GP)" class="flex-1 bg-white border border-slate-300 text-slate-900 text-sm rounded-xl px-4 py-3.5 outline-none focus:border-blue-700 focus:ring-2 focus:ring-blue-700/15 uppercase shadow-xs" />
+          <button type="submit" class="bg-blue-700 hover:bg-blue-800 text-white font-bold px-6 py-3.5 rounded-xl shadow-md shadow-blue-700/20 transition whitespace-nowrap cursor-pointer">
             বিশ্লেষণ দেখুন
           </button>
         </form>
+
+        <!-- Trust & Accuracy Strip -->
+        <div class="pt-3 grid grid-cols-3 gap-4 max-w-lg border-t border-slate-200/80">
+          <div>
+            <span class="block text-xl font-extrabold text-slate-900">৯৯.৮৮%</span>
+            <span class="text-xs text-slate-500">মডেল অ্যাকুরেসি</span>
+          </div>
+          <div>
+            <span class="block text-xl font-extrabold text-slate-900">১৭+</span>
+            <span class="text-xs text-slate-500">টেকনিক্যাল প্যারামিটার</span>
+          </div>
+          <div>
+            <span class="block text-xl font-extrabold text-slate-900">DSE & CSE</span>
+            <span class="text-xs text-slate-500">রিয়েল-টাইম ডেটা ফিড</span>
+          </div>
+        </div>
       </div>
 
-      <!-- 100% Dynamic Live Terminal Preview Card -->
+      <!-- Live Terminal Output Card -->
       <div class="lg:col-span-5">
-        <div class="bg-[#0B132B] border border-slate-800 rounded-2xl p-6 shadow-2xl">
-          <div class="flex items-center justify-between border-b border-slate-800 pb-4 mb-4">
+        <div class="bg-white border border-slate-200 rounded-2xl p-6 shadow-xl shadow-slate-200/60">
+          <div class="flex items-center justify-between border-b border-slate-100 pb-4 mb-5">
             <div>
-              <span class="text-xs text-slate-400">লাইভ MukiSoft AI মার্কেট ফিড</span>
-              <h3 id="sample-title" class="text-lg font-bold text-white">SQURPHARMA (DSE)</h3>
+              <span class="text-[11px] font-semibold uppercase tracking-wider text-slate-400">লাইভ মার্কেট ফিড</span>
+              <h3 id="sample-title" class="text-lg font-extrabold text-slate-900 mt-0.5">SQURPHARMA (DSE)</h3>
             </div>
-            <span id="sample-signal" class="px-3 py-1 rounded-lg bg-blue-500/15 text-blue-400 border border-blue-500/30 text-xs font-bold animate-pulse">
+            <span id="sample-signal" class="px-3 py-1.5 rounded-lg bg-blue-50 text-blue-700 border border-blue-200 text-xs font-bold">
               লাইভ ডেটা লোড হচ্ছে...
             </span>
           </div>
-          <div class="grid grid-cols-3 gap-3 mb-4 text-center">
-            <div class="bg-slate-900/90 p-3 rounded-xl border border-slate-800">
-              <span class="block text-[11px] text-slate-400">বর্তমান দর</span>
-              <strong id="sample-price" class="text-base text-white">--</strong>
+
+          <div class="grid grid-cols-3 gap-3 mb-5 text-center">
+            <div class="bg-slate-50 p-3.5 rounded-xl border border-slate-200/80">
+              <span class="block text-[11px] font-medium text-slate-500 mb-1">বর্তমান দর</span>
+              <strong id="sample-price" class="text-base font-extrabold text-slate-900">--</strong>
             </div>
-            <div class="bg-slate-900/90 p-3 rounded-xl border border-slate-800">
-              <span class="block text-[11px] text-slate-400">টার্গেট প্রাইস</span>
-              <strong id="sample-target" class="text-base text-emerald-400">--</strong>
+            <div class="bg-emerald-50/70 p-3.5 rounded-xl border border-emerald-200/80">
+              <span class="block text-[11px] font-medium text-emerald-700 mb-1">টার্গেট প্রাইস</span>
+              <strong id="sample-target" class="text-base font-extrabold text-emerald-700">--</strong>
             </div>
-            <div class="bg-slate-900/90 p-3 rounded-xl border border-slate-800">
-              <span class="block text-[11px] text-slate-400">স্টপ-লস</span>
-              <strong id="sample-stoploss" class="text-base text-rose-400">--</strong>
+            <div class="bg-rose-50/70 p-3.5 rounded-xl border border-rose-200/80">
+              <span class="block text-[11px] font-medium text-rose-700 mb-1">নিরাপদ স্টপ-লস</span>
+              <strong id="sample-stoploss" class="text-base font-extrabold text-rose-700">--</strong>
             </div>
           </div>
-          <p id="sample-ai-text" class="text-xs text-slate-300 bg-slate-900/70 p-3.5 rounded-xl border border-slate-800 leading-relaxed">
-            সার্ভার থেকে রিয়েল-টাইম মার্কেট ডেটা ও MukiSoft AI ট্রেডিং পরামর্শ সংগ্রহ করা হচ্ছে...
-          </p>
+
+          <div class="bg-slate-50 p-4 rounded-xl border border-slate-200/80">
+            <span class="block text-[11px] font-bold text-blue-700 uppercase tracking-wider mb-1">MukiSoft AI ট্রেডিং নোট</span>
+            <p id="sample-ai-text" class="text-xs text-slate-700 leading-relaxed">
+              সার্ভার থেকে রিয়েল-টাইম মার্কেট ডেটা ও MukiSoft AI ট্রেডিং পরামর্শ সংগ্রহ করা হচ্ছে...
+            </p>
+          </div>
         </div>
       </div>
 
     </div>
   </section>
 
-  <!-- NEW: Dynamic Live Buy Radar Section (Updates based on DSE/CSE session timing) -->
-  <section class="py-14 border-b border-slate-800/70 bg-[#080E20]">
+  <!-- Dynamic Live Buy Radar Section -->
+  <section class="py-16 bg-slate-50 border-b border-slate-200/80">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-      <div class="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-8">
+      <div class="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-10">
         <div>
-          <span id="picks-session-badge" class="inline-block px-3.5 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-xs font-bold mb-2">
+          <span id="picks-session-badge" class="inline-block px-3.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold mb-2.5">
             লাইভ মার্কেট স্ক্যানার লোড হচ্ছে...
           </span>
-          <h2 id="picks-headline" class="text-2xl sm:text-3xl font-extrabold text-white">
+          <h2 id="picks-headline" class="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
             আজকের / আগামী কার্যদিবসের সেরা বাই স্টকসমূহ
           </h2>
-          <p id="picks-subtext" class="text-slate-400 text-sm mt-1">
+          <p id="picks-subtext" class="text-slate-600 text-sm mt-1">
             DSE ও CSE লাইভ ডেটা স্ক্যান করে MukiSoft ৯৯.৮৮% ML মডেল সেরা এন্ট্রি পজিশনগুলো নির্বাচন করছে...
           </p>
         </div>
-        <div class="text-xs text-slate-400 bg-slate-900/90 px-4 py-2.5 rounded-xl border border-slate-800">
-          ট্রেডিং সময়: <strong>রবি – বৃহঃ (সকাল ১০:০০ – দুপুর ২:৩০)</strong>
+        <div class="text-xs text-slate-600 bg-white px-4 py-2.5 rounded-xl border border-slate-200 shadow-xs font-medium">
+          ট্রেডিং সেশন: <strong class="text-slate-900">রবি – বৃহঃ (সকাল ১০:০০ – দুপুর ২:৩০)</strong>
         </div>
       </div>
 
       <!-- Dynamic Cards Grid -->
-      <div id="dynamic-picks-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-        <!-- Skeleton Loaders while real data loads -->
-        <div class="bg-[#0B132B] border border-slate-800 p-6 rounded-2xl animate-pulse h-48"></div>
-        <div class="bg-[#0B132B] border border-slate-800 p-6 rounded-2xl animate-pulse h-48"></div>
-        <div class="bg-[#0B132B] border border-slate-800 p-6 rounded-2xl animate-pulse h-48"></div>
+      <div id="dynamic-picks-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div class="bg-white border border-slate-200 p-6 rounded-2xl animate-pulse h-48"></div>
+        <div class="bg-white border border-slate-200 p-6 rounded-2xl animate-pulse h-48"></div>
+        <div class="bg-white border border-slate-200 p-6 rounded-2xl animate-pulse h-48"></div>
       </div>
     </div>
   </section>
 
-  <!-- Features Section -->
-  <section class="py-14 border-b border-slate-800/70">
+  <!-- Core Architecture & Accuracy Section -->
+  <section class="py-16 bg-white border-b border-slate-200/80">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-      <div class="text-center max-w-2xl mx-auto mb-10">
-        <h2 class="text-2xl sm:text-3xl font-bold text-white mb-2">কেন বিনিয়োগকারীরা MukiSoft AI ব্যবহার করবেন?</h2>
-        <p class="text-slate-400 text-sm">ইন্সটিটিউশনাল-গ্রেড টেকনিক্যাল অ্যানালাইসিস এখন সবার হাতের মুঠোয়।</p>
+      <div class="max-w-2xl mb-12">
+        <span class="text-blue-700 text-xs font-bold uppercase tracking-wider">ইন্সটিটিউশনাল কোয়ান্টিটেটিভ আর্কিটেকচার</span>
+        <h2 class="text-2xl sm:text-3xl font-extrabold text-slate-900 mt-1 mb-2">কেন MukiSoft AI বাংলাদেশের বিনিয়োগকারীদের প্রথম পছন্দ?</h2>
+        <p class="text-slate-600 text-sm">আবেগ বা গুজব নয়—সম্পূর্ণ গাণিতিক ও মেশিন লার্নিং ভিত্তিক সিদ্ধান্ত সহায়ক প্ল্যাটফর্ম।</p>
       </div>
 
       <div class="grid md:grid-cols-3 gap-6">
-        <div class="bg-[#0B132B] border border-slate-800 p-6 rounded-2xl hover:border-blue-500/40 transition">
-          <div class="w-11 h-11 rounded-xl bg-blue-600/20 text-blue-400 flex items-center justify-center font-bold text-xl mb-4">📊</div>
-          <h3 class="text-lg font-bold text-white mb-2">৯৯.৮৮% অ্যাকুরেট ML ইঞ্জিন</h3>
-          <p class="text-slate-400 text-sm leading-relaxed">DSE ও CSE-এর ঐতিহাসিক ডেটার ওপর ট্রেন করা মডেল যা ১৭টি টেকনিক্যাল প্যারামিটার বিশ্লেষণ করে সিগন্যাল দেয়।</p>
+        <div class="bg-white border border-slate-200 p-7 rounded-2xl shadow-xs hover:border-blue-600/40 transition">
+          <div class="w-11 h-11 rounded-xl bg-blue-50 text-blue-700 border border-blue-100 flex items-center justify-center mb-5">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 0 1 3 19.875v-6.75ZM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V8.625ZM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V4.125Z"/></svg>
+          </div>
+          <h3 class="text-lg font-bold text-slate-900 mb-2">৯৯.৮৮% অ্যাকুরেসি ML ইঞ্জিন</h3>
+          <p class="text-slate-600 text-sm leading-relaxed">DSE ও CSE-এর ঐতিহাসিক প্রাইস অ্যাকশনের ওপর ট্রেন করা XGBoost ক্লাসিফায়ার, যা ১৭টি টেকনিক্যাল ইন্ডিকেটর যাচাই করে হাই-প্রিসিশন সিগন্যাল দেয়।</p>
         </div>
 
-        <div class="bg-[#0B132B] border border-slate-800 p-6 rounded-2xl hover:border-blue-500/40 transition">
-          <div class="w-11 h-11 rounded-xl bg-emerald-600/20 text-emerald-400 flex items-center justify-center font-bold text-xl mb-4">🎯</div>
-          <h3 class="text-lg font-bold text-white mb-2">অটো টার্গেট ও স্টপ-লস</h3>
-          <p class="text-slate-400 text-sm leading-relaxed">কত টাকায় শেয়ারটি কিনবেন, কোথায় লাভ নেবেন (Target) এবং রিস্ক এড়াতে কোথায় স্টপ-লস দেবেন তা অটোমেটিক হিসাব করে দেয়।</p>
+        <div class="bg-white border border-slate-200 p-7 rounded-2xl shadow-xs hover:border-blue-600/40 transition">
+          <div class="w-11 h-11 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-100 flex items-center justify-center mb-5">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285Z"/></svg>
+          </div>
+          <h3 class="text-lg font-bold text-slate-900 mb-2">অটোমেটেড টার্গেট ও স্টপ-লস</h3>
+          <p class="text-slate-600 text-sm leading-relaxed">বলিঙ্গার ব্যান্ড ও ভোলাটিলিটি বিশ্লেষণ করে প্রতিটি শেয়ারের জন্য সম্ভাব্য প্রফিট টার্গেট এবং ঝুঁকি নিয়ন্ত্রণের নিরাপদ স্টপ-লস সীমা নির্ধারণ করে।</p>
         </div>
 
-        <div class="bg-[#0B132B] border border-slate-800 p-6 rounded-2xl hover:border-blue-500/40 transition">
-          <div class="w-11 h-11 rounded-xl bg-purple-600/20 text-purple-400 flex items-center justify-center font-bold text-xl mb-4">🤖</div>
-          <h3 class="text-lg font-bold text-white mb-2">সহজ বাংলায় MukiSoft AI পরামর্শ</h3>
-          <p class="text-slate-400 text-sm leading-relaxed">জটিল চার্ট না বুঝলেও সমস্যা নেই—MukiSoft AI প্রতিটি শেয়ারের বর্তমান অবস্থা সহজ বাংলায় বুঝিয়ে পরামর্শ দেয়।</p>
+        <div class="bg-white border border-slate-200 p-7 rounded-2xl shadow-xs hover:border-blue-600/40 transition">
+          <div class="w-11 h-11 rounded-xl bg-slate-100 text-slate-800 border border-slate-200 flex items-center justify-center mb-5">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.129.166 2.27.293 3.423.379.35.026.67.21.865.501L12 21l2.755-4.133a1.14 1.14 0 0 1 .865-.501 48.172 48.172 0 0 0 3.423-.379c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0 0 12 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018Z"/></svg>
+          </div>
+          <h3 class="text-lg font-bold text-slate-900 mb-2">সহজ বাংলায় ট্রেডিং গাইডলাইন</h3>
+          <p class="text-slate-600 text-sm leading-relaxed">জটিল চার্ট বা সংখ্যার পরিবর্তে MukiSoft AI আপনাকে সংক্ষিপ্ত ও স্পষ্ট বাংলায় জানিয়ে দেয় এখন এন্ট্রি নেওয়া ভালো হবে নাকি অপেক্ষা করা উচিত।</p>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- About Snapshot -->
-  <section class="py-14">
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 bg-gradient-to-r from-blue-950/50 to-slate-900 border border-blue-500/20 rounded-3xl p-8 md:p-10 flex flex-col md:flex-row items-center justify-between gap-6">
+  <!-- Institutional CTA Banner -->
+  <section class="py-16 bg-slate-50">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 bg-slate-900 rounded-3xl p-8 md:p-12 flex flex-col md:flex-row items-center justify-between gap-8 shadow-xl">
       <div class="max-w-2xl">
-        <h2 class="text-2xl font-bold text-white mb-2">MukiSoft Technology-এর একটি উদ্ভাবন</h2>
+        <span class="text-sky-400 text-xs font-bold uppercase tracking-widest">MukiSoft Technology Initiative</span>
+        <h2 class="text-2xl sm:text-3xl font-extrabold text-white mt-1 mb-3">স্মার্ট ডেটা অ্যানালাইসিস শুরু করুন এখনই</h2>
         <p class="text-slate-300 text-sm leading-relaxed">
-          বাংলাদেশের পুঁজিবাজারকে আধুনিক ডেটা সায়েন্স এবং আর্টিফিশিয়াল ইন্টেলিজেন্সের সাথে যুক্ত করতে MukiSoft Technology এই প্ল্যাটফর্মটি তৈরি করেছে।
+          কোনো রেজিস্ট্রেশন বা সাবস্ক্রিপশন ছাড়াই ঢাকা ও চট্টগ্রাম স্টক এক্সচেঞ্জের যেকোনো কোম্পানির টেকনিক্যাল অবস্থান এবং লাইভ ক্যান্ডেলস্টিক চার্ট যাচাই করুন।
         </p>
       </div>
-      <div class="flex gap-3 shrink-0">
-        <a href="about.html" class="px-5 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-sm font-semibold border border-slate-700 transition">বিস্তারিত জানুন</a>
-        <a href="analyzer.html" class="px-5 py-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold transition">টার্মিনাল খুলুন</a>
+      <div class="flex flex-wrap gap-3 shrink-0">
+        <a href="market.html" class="px-6 py-3.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-sm font-semibold border border-slate-700 transition">লাইভ চার্ট দেখুন</a>
+        <a href="analyzer.html" class="px-6 py-3.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold transition">AI অ্যানালাইজার খুলুন</a>
       </div>
     </div>
   </section>
 
   <!-- Footer -->
-  <footer class="border-t border-slate-800/80 bg-[#040812] py-8 text-xs text-slate-400">
+  <footer class="border-t border-slate-200 bg-white py-8 text-xs text-slate-500">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-4">
-      <div>© 2026 <strong class="text-white">MukiSoft Technology</strong>. সর্বস্বত্ব সংরক্ষিত।</div>
+      <div class="flex items-center gap-3">
+        <img src="assets/logo.svg" alt="MukiSoft AI" class="h-8 w-auto" />
+        <span>© 2026 <strong class="text-slate-900">MukiSoft Technology</strong>. সর্বস্বত্ব সংরক্ষিত।</span>
+      </div>
       <div class="text-center sm:text-right text-slate-500">
         সতর্কীকরণ: এটি একটি ডেটা-ড্রিভেন MukiSoft AI রিসার্চ টুল, কোনো সরাসরি ফিন্যান্সিয়াল অ্যাডভাইস নয়।
       </div>

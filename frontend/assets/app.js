@@ -1,11 +1,11 @@
 // ============================================================
-// MukiSoft AI - Live Scraper + Dynamic Buy Radar + Multi-File
+// MukiSoft AI - Institutional Light Theme UI & Live Engine
 // ============================================================
 
 const API_BASE_URL = "https://mukisoft-stock-ai.onrender.com";
 
 const SECTOR_STOCKS = {
-  "Pharmaceuticals & Chemicals": ["ACI", "SQURPHARMA", "RENATA", "BXPHARMA", "ACMEPL", "BEACONPHAR", "ORIONPHARM", "IBNSINA"],
+  "Pharmaceuticals & Chemicals": ["SQURPHARMA", "RENATA", "BXPHARMA", "ACI", "ACMEPL", "BEACONPHAR", "ORIONPHARM", "IBNSINA"],
   "Bank": ["BRACBANK", "CITYBANK", "DUTCHBANGL", "EBL", "ISLAMIBANK", "PUBALIBANK", "PRIMEBANK", "MTB", "UCB"],
   "Telecommunication": ["GP", "ROBI", "BSCCL"],
   "Engineering": ["WALTONHIL", "BSRMSTEEL", "BSRMLTD", "GPHISPAT", "SINGERBD", "RUNNERAUTO", "BBSCABLES"],
@@ -62,7 +62,7 @@ document.addEventListener("DOMContentLoaded", () => {
 function updateOfficialLinks() {
   const input = document.getElementById("symbol-input");
   if (!input) return;
-  const sym = input.value.trim().toUpperCase() || "ACI";
+  const sym = input.value.trim().toUpperCase() || "SQURPHARMA";
   const dseLink = document.getElementById("dse-direct-link");
   const cseLink = document.getElementById("cse-direct-link");
   const label = document.getElementById("fallback-symbol-label");
@@ -82,12 +82,8 @@ async function loadDynamicLandingData() {
     const res = await fetch(`${API_BASE_URL}/api/market-live`);
     if (res.ok) {
       const mkt = await res.json();
-      dsexEl.classList.remove("animate-pulse");
       dsexEl.innerText = mkt.dsex;
-      if (ds30El) {
-        ds30El.classList.remove("animate-pulse");
-        ds30El.innerText = mkt.ds30;
-      }
+      if (ds30El) ds30El.innerText = mkt.ds30;
       if (updEl) updEl.innerText = mkt.updated;
     }
   } catch (_) {}
@@ -101,10 +97,9 @@ async function loadDynamicLandingData() {
       document.getElementById("sample-target").innerText = `৳ ${sData.target_price}`;
       document.getElementById("sample-stoploss").innerText = `৳ ${sData.stop_loss}`;
       if (sigEl) {
-        sigEl.classList.remove("animate-pulse");
         sigEl.innerText = `${sData.signal} • ${sData.confidence}%`;
       }
-      document.getElementById("sample-ai-text").innerText = `"${sData.ai_analysis_bn}"`;
+      document.getElementById("sample-ai-text").innerText = sData.ai_analysis_bn;
     }
   } catch (_) {}
 }
@@ -122,14 +117,14 @@ async function loadDynamicTopPicks() {
       const badgeEl = document.getElementById("picks-session-badge");
       const headEl = document.getElementById("picks-headline");
       const subEl = document.getElementById("picks-subtext");
-      if (badgeEl) badgeEl.innerText = data.session.badge;
+      if (badgeEl) badgeEl.innerText = data.session.badge.replace(/[^\u0980-\u09FFa-zA-Z0-9\s:().•-]/g, "").trim();
       if (headEl) headEl.innerText = data.session.headline;
       if (subEl) subEl.innerText = data.session.subtext;
     }
 
     const picks = data.picks || [];
     if (picks.length === 0) {
-      grid.innerHTML = `<div class="col-span-full text-center text-slate-400 text-sm py-8 bg-[#0B132B] rounded-2xl border border-slate-800">বর্তমানে লাইভ মার্কেট ডেটা আপডেট হচ্ছে। সরাসরি যেকোনো কোম্পানি পরীক্ষা করতে <a href="analyzer.html" class="text-blue-400 underline">AI অ্যানালাইজার</a> ব্যবহার করুন।</div>`;
+      grid.innerHTML = `<div class="col-span-full text-center text-slate-600 text-sm py-8 bg-white rounded-2xl border border-slate-200">বর্তমানে লাইভ মার্কেট ডেটা আপডেট হচ্ছে। সরাসরি যেকোনো কোম্পানি পরীক্ষা করতে <a href="analyzer.html" class="text-blue-700 font-semibold underline">AI অ্যানালাইজার</a> ব্যবহার করুন।</div>`;
       return;
     }
 
@@ -141,52 +136,52 @@ async function loadDynamicTopPicks() {
         : "আগামীকাল সকাল ১০:০০টায় এন্ট্রি";
 
       const card = document.createElement("div");
-      card.className = "bg-[#0B132B] border border-slate-800 hover:border-blue-500/50 rounded-2xl p-5 transition flex flex-col justify-between shadow-lg";
+      card.className = "bg-white border border-slate-200 hover:border-blue-600/50 rounded-2xl p-5 transition flex flex-col justify-between shadow-xs hover:shadow-md";
       card.innerHTML = `
         <div>
           <div class="flex items-center justify-between mb-3">
             <div>
-              <h3 class="text-lg font-extrabold text-white">${item.symbol}</h3>
-              <span class="text-[11px] text-slate-400">${item.exchange} • RSI: ${item.rsi}</span>
+              <h3 class="text-lg font-extrabold text-slate-900">${item.symbol}</h3>
+              <span class="text-[11px] font-medium text-slate-500">${item.exchange} • RSI: ${item.rsi}</span>
             </div>
-            <span class="px-3 py-1 rounded-lg text-xs font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+            <span class="px-3 py-1 rounded-lg text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
               ${item.signal}
             </span>
           </div>
 
-          <div class="flex items-baseline justify-between border-y border-slate-800/80 py-3 my-3">
+          <div class="flex items-baseline justify-between border-y border-slate-100 py-3 my-3">
             <div>
-              <span class="text-[11px] text-slate-400 block">বর্তমান / ক্লোজিং দর</span>
-              <strong class="text-2xl font-extrabold text-white">৳ ${Number(item.price).toFixed(2)}</strong>
+              <span class="text-[11px] text-slate-500 block">বর্তমান / ক্লোজিং দর</span>
+              <strong class="text-2xl font-extrabold text-slate-900">৳ ${Number(item.price).toFixed(2)}</strong>
             </div>
-            <span class="text-xs font-bold px-2.5 py-1 rounded-md ${isPositive ? 'bg-emerald-500/10 text-emerald-400' : 'bg-amber-500/10 text-amber-400'}">
+            <span class="text-xs font-bold px-2.5 py-1 rounded-md ${isPositive ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}">
               ${isPositive ? '+' : ''}${item.change_pct}%
             </span>
           </div>
 
-          <div class="grid grid-cols-2 gap-2 text-xs mb-4">
-            <div class="bg-slate-900/90 p-2.5 rounded-xl border border-slate-800">
-              <span class="text-slate-400 block text-[10px]">টার্গেট প্রাইস</span>
-              <strong class="text-emerald-400 font-bold">৳ ${item.target_price}</strong>
+          <div class="grid grid-cols-2 gap-2.5 text-xs mb-4">
+            <div class="bg-slate-50 p-2.5 rounded-xl border border-slate-200/80">
+              <span class="text-slate-500 block text-[10px]">টার্গেট প্রাইস</span>
+              <strong class="text-emerald-700 font-bold">৳ ${item.target_price}</strong>
             </div>
-            <div class="bg-slate-900/90 p-2.5 rounded-xl border border-slate-800">
-              <span class="text-slate-400 block text-[10px]">নিরাপদ স্টপ-লস</span>
-              <strong class="text-rose-400 font-bold">৳ ${item.stop_loss}</strong>
+            <div class="bg-slate-50 p-2.5 rounded-xl border border-slate-200/80">
+              <span class="text-slate-500 block text-[10px]">নিরাপদ স্টপ-লস</span>
+              <strong class="text-rose-700 font-bold">৳ ${item.stop_loss}</strong>
             </div>
           </div>
         </div>
 
-        <div class="flex items-center justify-between pt-2 border-t border-slate-800/70">
-          <span class="text-[11px] text-blue-400 font-semibold">⏱ ${actionTiming}</span>
-          <a href="analyzer.html?symbol=${encodeURIComponent(item.symbol)}&exchange=DSE" class="text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white px-3.5 py-1.5 rounded-lg transition">
-            AI রিপোর্ট →
+        <div class="flex items-center justify-between pt-3 border-t border-slate-100">
+          <span class="text-[11px] text-blue-700 font-semibold">${actionTiming}</span>
+          <a href="analyzer.html?symbol=${encodeURIComponent(item.symbol)}&exchange=DSE" class="text-xs font-bold bg-blue-700 hover:bg-blue-800 text-white px-3.5 py-1.5 rounded-lg transition">
+            AI রিপোর্ট
           </a>
         </div>
       `;
       grid.appendChild(card);
     });
   } catch (err) {
-    grid.innerHTML = `<div class="col-span-full text-center text-slate-400 text-sm py-6 bg-[#0B132B] rounded-2xl border border-slate-800">লাইভ মার্কেট স্ক্যানার প্রস্তুত হচ্ছে—যেকোনো স্টক দেখতে <a href="analyzer.html" class="text-blue-400 font-semibold underline">MukiSoft AI অ্যানালাইজার</a> খুলুন।</div>`;
+    grid.innerHTML = `<div class="col-span-full text-center text-slate-600 text-sm py-6 bg-white rounded-2xl border border-slate-200">লাইভ মার্কেট স্ক্যানার প্রস্তুত হচ্ছে—যেকোনো স্টক দেখতে <a href="analyzer.html" class="text-blue-700 font-semibold underline">MukiSoft AI অ্যানালাইজার</a> খুলুন।</div>`;
   }
 }
 
@@ -232,11 +227,11 @@ function setExchange(ex) {
   if (!dseBtn || !cseBtn) return;
 
   if (ex === "DSE") {
-    dseBtn.className = "px-5 py-2.5 rounded-lg text-sm font-bold bg-blue-600 text-white shadow-lg transition";
-    cseBtn.className = "px-5 py-2.5 rounded-lg text-sm font-bold text-slate-400 hover:text-white transition";
+    dseBtn.className = "px-5 py-2.5 rounded-lg text-sm font-bold bg-blue-700 text-white shadow-xs transition cursor-pointer";
+    cseBtn.className = "px-5 py-2.5 rounded-lg text-sm font-bold text-slate-600 hover:text-slate-900 transition cursor-pointer";
   } else {
-    cseBtn.className = "px-5 py-2.5 rounded-lg text-sm font-bold bg-blue-600 text-white shadow-lg transition";
-    dseBtn.className = "px-5 py-2.5 rounded-lg text-sm font-bold text-slate-400 hover:text-white transition";
+    cseBtn.className = "px-5 py-2.5 rounded-lg text-sm font-bold bg-blue-700 text-white shadow-xs transition cursor-pointer";
+    dseBtn.className = "px-5 py-2.5 rounded-lg text-sm font-bold text-slate-600 hover:text-slate-900 transition cursor-pointer";
   }
   updateOfficialLinks();
 }
@@ -308,20 +303,19 @@ function renderFileList() {
   uploadedFilesList.forEach((file, index) => {
     const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
     const card = document.createElement("div");
-    card.className = "flex items-center justify-between gap-2 bg-slate-900 border border-slate-700 rounded-xl p-3";
+    card.className = "flex items-center justify-between gap-2 bg-slate-50 border border-slate-300 rounded-xl p-3";
 
     const info = document.createElement("div");
     info.className = "flex items-center gap-2.5 overflow-hidden";
     info.innerHTML = `
-      <span class="text-lg shrink-0">${isPdf ? "📄" : "🖼️"}</span>
-      <span class="text-xs text-slate-200 font-medium truncate">${file.name}</span>
+      <span class="px-2 py-0.5 rounded bg-blue-100 text-blue-800 text-[10px] font-bold shrink-0">${isPdf ? "PDF" : "IMG"}</span>
+      <span class="text-xs text-slate-800 font-medium truncate">${file.name}</span>
     `;
 
     const delBtn = document.createElement("button");
     delBtn.type = "button";
-    delBtn.innerText = "✕";
-    delBtn.title = "ফাইলটি ডিলিট করুন";
-    delBtn.className = "w-7 h-7 rounded-lg bg-rose-500/20 hover:bg-rose-500 text-rose-300 hover:text-white text-xs font-bold shrink-0 transition cursor-pointer";
+    delBtn.innerText = "Remove";
+    delBtn.className = "px-2 py-1 rounded-lg bg-rose-50 hover:bg-rose-600 text-rose-700 hover:text-white text-[11px] font-bold shrink-0 transition cursor-pointer";
     delBtn.onclick = () => removeFileAtIndex(index);
 
     card.appendChild(info);
@@ -421,11 +415,11 @@ function renderDashboard(data) {
   const badge = document.getElementById("res-signal-badge");
   badge.innerText = data.signal;
   if (data.signal_code === 2) {
-    badge.className = "inline-block px-3.5 py-1.5 rounded-lg text-sm font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30";
+    badge.className = "inline-block px-3.5 py-1.5 rounded-lg text-sm font-bold bg-emerald-50 text-emerald-700 border border-emerald-200";
   } else if (data.signal_code === 0) {
-    badge.className = "inline-block px-3.5 py-1.5 rounded-lg text-sm font-bold bg-rose-500/15 text-rose-400 border border-rose-500/30";
+    badge.className = "inline-block px-3.5 py-1.5 rounded-lg text-sm font-bold bg-rose-50 text-rose-700 border border-rose-200";
   } else {
-    badge.className = "inline-block px-3.5 py-1.5 rounded-lg text-sm font-bold bg-amber-500/15 text-amber-400 border border-amber-500/30";
+    badge.className = "inline-block px-3.5 py-1.5 rounded-lg text-sm font-bold bg-amber-50 text-amber-800 border border-amber-200";
   }
 
   const ctx = document.getElementById("stockChart");
@@ -438,11 +432,11 @@ function renderDashboard(data) {
         datasets: [{
           label: `${data.symbol} Price (BDT)`,
           data: data.chart_history.map((d) => d.close),
-          borderColor: "#3b82f6",
-          backgroundColor: "rgba(59, 130, 246, 0.15)",
+          borderColor: "#1D4ED8",
+          backgroundColor: "rgba(29, 78, 216, 0.08)",
           borderWidth: 2.5,
           fill: true,
-          tension: 0.35
+          tension: 0.3
         }]
       },
       options: {
@@ -450,8 +444,8 @@ function renderDashboard(data) {
         maintainAspectRatio: false,
         plugins: { legend: { display: false } },
         scales: {
-          x: { grid: { color: "rgba(148, 163, 184, 0.08)" }, ticks: { color: "#94a3b8" } },
-          y: { grid: { color: "rgba(148, 163, 184, 0.08)" }, ticks: { color: "#94a3b8" } }
+          x: { grid: { color: "#F1F5F9" }, ticks: { color: "#475569" } },
+          y: { grid: { color: "#F1F5F9" }, ticks: { color: "#475569" } }
         }
       }
     });

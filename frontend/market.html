@@ -4,112 +4,103 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>DSE & CSE Pro TradingView Terminal — MukiSoft AI</title>
+  <link rel="icon" type="image/svg+xml" href="assets/logo.svg" />
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <style>
-    body { font-family: 'Inter', 'Hind Siliguri', sans-serif; }
-  </style>
+  <style>body { font-family: 'Inter', 'Hind Siliguri', sans-serif; }</style>
 </head>
-<body class="bg-[#060B19] text-slate-100 min-h-screen flex flex-col">
+<body class="bg-slate-50 text-slate-900 min-h-screen flex flex-col">
 
   <!-- Top Navigation Bar -->
-  <header class="sticky top-0 z-50 bg-[#060B19]/95 backdrop-blur-xl border-b border-slate-800/80">
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-      <a href="index.html" class="flex items-center gap-3">
-        <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 to-cyan-500 flex items-center justify-center font-extrabold text-white text-lg">M</div>
-        <div>
-          <span class="text-lg font-extrabold text-white">MukiSoft <span class="text-blue-400">AI</span></span>
-          <span class="block text-[10px] text-slate-400 uppercase tracking-widest">Pro Chart Terminal</span>
-        </div>
+  <header class="sticky top-0 z-50 bg-white/95 backdrop-blur-md border-b border-slate-200/90 shadow-xs">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-18 py-3 flex items-center justify-between">
+      <a href="index.html" class="flex items-center">
+        <img src="assets/logo.svg" alt="MukiSoft AI" class="h-11 w-auto" />
       </a>
 
-      <nav class="hidden md:flex items-center gap-1 bg-slate-900/80 p-1 rounded-xl border border-slate-800">
-        <a href="index.html" class="px-4 py-2 rounded-lg text-sm font-medium text-slate-300 hover:bg-slate-800">হোম (Home)</a>
-        <a href="analyzer.html" class="px-4 py-2 rounded-lg text-sm font-medium text-slate-300 hover:bg-slate-800">MukiSoft AI অ্যানালাইজার</a>
-        <a href="market.html" class="px-4 py-2 rounded-lg text-sm font-semibold bg-blue-600 text-white">DSE / CSE মার্কেট</a>
-        <a href="about.html" class="px-4 py-2 rounded-lg text-sm font-medium text-slate-300 hover:bg-slate-800">আমাদের সম্পর্কে</a>
-        <a href="contact.html" class="px-4 py-2 rounded-lg text-sm font-medium text-slate-300 hover:bg-slate-800">যোগাযোগ</a>
+      <nav class="hidden md:flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200/80">
+        <a href="index.html" class="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:text-slate-900">হোম (Home)</a>
+        <a href="analyzer.html" class="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:text-slate-900">AI অ্যানালাইজার</a>
+        <a href="market.html" class="px-4 py-2 rounded-lg text-sm font-semibold bg-white text-blue-700 shadow-xs">DSE / CSE মার্কেট</a>
+        <a href="about.html" class="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:text-slate-900">আমাদের সম্পর্কে</a>
+        <a href="contact.html" class="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:text-slate-900">যোগাযোগ</a>
       </nav>
 
-      <button id="mobile-menu-btn" class="md:hidden p-2 rounded-lg bg-slate-900 border border-slate-800 text-slate-300">☰</button>
+      <button id="mobile-menu-btn" class="md:hidden p-2 rounded-lg bg-slate-100 border border-slate-200 text-slate-700">☰</button>
     </div>
 
-    <div id="mobile-menu" class="hidden md:hidden bg-[#0B132B] border-b border-slate-800 px-4 py-4 space-y-2">
-      <a href="index.html" class="block px-4 py-2 rounded-lg text-slate-300">হোম</a>
-      <a href="analyzer.html" class="block px-4 py-2 rounded-lg text-slate-300">MukiSoft AI অ্যানালাইজার</a>
-      <a href="market.html" class="block px-4 py-2 rounded-lg bg-blue-600 text-white font-semibold">DSE / CSE মার্কেট</a>
-      <a href="about.html" class="block px-4 py-2 rounded-lg text-slate-300">আমাদের সম্পর্কে</a>
-      <a href="contact.html" class="block px-4 py-2 rounded-lg text-slate-300">যোগাযোগ</a>
+    <div id="mobile-menu" class="hidden md:hidden bg-white border-b border-slate-200 px-4 py-4 space-y-2">
+      <a href="index.html" class="block px-4 py-2 rounded-lg text-slate-700">হোম</a>
+      <a href="analyzer.html" class="block px-4 py-2 rounded-lg text-slate-700">AI অ্যানালাইজার</a>
+      <a href="market.html" class="block px-4 py-2 rounded-lg bg-blue-50 text-blue-700 font-semibold">DSE / CSE মার্কেট</a>
+      <a href="about.html" class="block px-4 py-2 rounded-lg text-slate-700">আমাদের সম্পর্কে</a>
+      <a href="contact.html" class="block px-4 py-2 rounded-lg text-slate-700">যোগাযোগ</a>
     </div>
   </header>
 
   <main class="max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 flex-1 space-y-5">
 
-    <!-- Pair & Sector Selection Bar (Just like Analyzer + TradingView) -->
-    <div class="bg-[#0B132B] border border-slate-800 rounded-2xl p-4 sm:p-5 shadow-xl">
+    <!-- Pair & Sector Selection Bar -->
+    <div class="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 shadow-xs">
       <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-3 items-end">
-        <!-- Exchange -->
         <div class="lg:col-span-2">
-          <label class="block text-[11px] text-slate-400 mb-1">এক্সচেঞ্জ (Exchange)</label>
-          <div class="flex bg-slate-950 p-1 rounded-xl border border-slate-800">
-            <button type="button" id="tv-btn-dse" onclick="setTVExchange('DSE')" class="flex-1 py-2 rounded-lg text-xs font-bold bg-blue-600 text-white transition">DSE</button>
-            <button type="button" id="tv-btn-cse" onclick="setTVExchange('CSE')" class="flex-1 py-2 rounded-lg text-xs font-bold text-slate-400 hover:text-white transition">CSE</button>
+          <label class="block text-[11px] font-semibold text-slate-500 mb-1">এক্সচেঞ্জ</label>
+          <div class="flex bg-slate-100 p-1 rounded-xl border border-slate-200">
+            <button type="button" id="tv-btn-dse" onclick="setTVExchange('DSE')" class="flex-1 py-2 rounded-lg text-xs font-bold bg-blue-700 text-white transition cursor-pointer">DSE</button>
+            <button type="button" id="tv-btn-cse" onclick="setTVExchange('CSE')" class="flex-1 py-2 rounded-lg text-xs font-bold text-slate-600 hover:text-slate-900 transition cursor-pointer">CSE</button>
           </div>
         </div>
 
-        <!-- Sector Selector -->
         <div class="lg:col-span-4">
-          <label class="block text-[11px] text-slate-400 mb-1">১. সেক্টর বাছাই করুন (All Sectors)</label>
-          <select id="tv-sector-select" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-sm text-white outline-none focus:border-blue-500"></select>
+          <label class="block text-[11px] font-semibold text-slate-500 mb-1">১. সেক্টর বাছাই করুন (All Sectors)</label>
+          <select id="tv-sector-select" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-sm font-medium text-slate-900 outline-none focus:border-blue-700"></select>
         </div>
 
-        <!-- Company Pair Selector -->
         <div class="lg:col-span-4">
-          <label class="block text-[11px] text-slate-400 mb-1">২. কোম্পানি পেয়ার সিলেক্ট করুন (All Pairs)</label>
-          <select id="tv-stock-select" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-sm text-white outline-none focus:border-blue-500"></select>
+          <label class="block text-[11px] font-semibold text-slate-500 mb-1">২. কোম্পানি পেয়ার সিলেক্ট করুন (All Pairs)</label>
+          <select id="tv-stock-select" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-sm font-medium text-slate-900 outline-none focus:border-blue-700"></select>
         </div>
 
-        <!-- Custom Symbol Load -->
         <div class="lg:col-span-2">
-          <button onclick="loadProChart()" class="w-full bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold py-3 px-4 rounded-xl shadow-lg transition cursor-pointer">
+          <button onclick="loadProChart()" class="w-full bg-blue-700 hover:bg-blue-800 text-white text-xs font-bold py-3 px-4 rounded-xl shadow-xs transition cursor-pointer">
             চার্ট লোড করুন
           </button>
         </div>
       </div>
 
-      <!-- Technical Indicators Toggle Toolbar -->
-      <div class="mt-4 pt-4 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-3">
+      <!-- Technical Indicators Toolbar -->
+      <div class="mt-4 pt-4 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3">
         <div class="flex flex-wrap items-center gap-2">
-          <span class="text-xs font-semibold text-slate-400 mr-1">📐 টেকনিক্যাল ইন্ডিকেটর:</span>
+          <span class="text-xs font-bold text-slate-600 mr-1">টেকনিক্যাল ইন্ডিকেটর:</span>
           
-          <button type="button" id="ind-sma" onclick="toggleIndicator('sma')" class="px-3 py-1.5 rounded-lg text-xs font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 transition cursor-pointer">
-            ✓ SMA (20)
+          <button type="button" id="ind-sma" onclick="toggleIndicator('sma')" class="px-3 py-1.5 rounded-lg text-xs font-bold bg-amber-50 text-amber-800 border border-amber-300 transition cursor-pointer">
+            ON • SMA (20)
           </button>
           
-          <button type="button" id="ind-ema" onclick="toggleIndicator('ema')" class="px-3 py-1.5 rounded-lg text-xs font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 transition cursor-pointer">
-            ✓ EMA (20)
+          <button type="button" id="ind-ema" onclick="toggleIndicator('ema')" class="px-3 py-1.5 rounded-lg text-xs font-bold bg-sky-50 text-sky-800 border border-sky-300 transition cursor-pointer">
+            ON • EMA (20)
           </button>
           
-          <button type="button" id="ind-bb" onclick="toggleIndicator('bb')" class="px-3 py-1.5 rounded-lg text-xs font-bold bg-purple-500/20 text-purple-300 border border-purple-500/40 transition cursor-pointer">
-            ✓ Bollinger Bands
+          <button type="button" id="ind-bb" onclick="toggleIndicator('bb')" class="px-3 py-1.5 rounded-lg text-xs font-bold bg-purple-50 text-purple-800 border border-purple-300 transition cursor-pointer">
+            ON • Bollinger Bands
           </button>
           
-          <button type="button" id="ind-vol" onclick="toggleIndicator('vol')" class="px-3 py-1.5 rounded-lg text-xs font-bold bg-blue-500/20 text-blue-300 border border-blue-500/40 transition cursor-pointer">
-            ✓ Volume
+          <button type="button" id="ind-vol" onclick="toggleIndicator('vol')" class="px-3 py-1.5 rounded-lg text-xs font-bold bg-blue-50 text-blue-800 border border-blue-300 transition cursor-pointer">
+            ON • Volume
           </button>
 
-          <button type="button" id="ind-rsi" onclick="toggleIndicator('rsi')" class="px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 transition cursor-pointer">
-            ✓ RSI (14)
+          <button type="button" id="ind-rsi" onclick="toggleIndicator('rsi')" class="px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-50 text-emerald-800 border border-emerald-300 transition cursor-pointer">
+            ON • RSI (14)
           </button>
         </div>
 
         <div class="flex items-center gap-2">
-          <button type="button" onclick="resetChartZoom()" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 cursor-pointer">
-            ↺ Reset Zoom
+          <button type="button" onclick="resetChartZoom()" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 cursor-pointer">
+            Reset Zoom
           </button>
-          <a id="full-report-link" href="analyzer.html?symbol=SQURPHARMA&exchange=DSE" class="px-4 py-1.5 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white shadow transition">
-            পূর্ণ AI রিপোর্ট দেখুন →
+          <a id="full-report-link" href="analyzer.html?symbol=SQURPHARMA&exchange=DSE" class="px-4 py-1.5 rounded-lg text-xs font-bold bg-emerald-700 hover:bg-emerald-800 text-white shadow-xs transition">
+            পূর্ণ AI রিপোর্ট দেখুন
           </a>
         </div>
       </div>
@@ -117,71 +108,68 @@
 
     <!-- Live Metrics Strip -->
     <div class="grid grid-cols-2 sm:grid-cols-5 gap-3">
-      <div class="bg-[#0B132B] border border-slate-800 p-3.5 rounded-xl">
-        <span class="text-[11px] text-slate-400 block">নির্বাচিত পেয়ার</span>
-        <strong id="m-pair" class="text-base font-extrabold text-blue-400">SQURPHARMA / BDT</strong>
+      <div class="bg-white border border-slate-200 p-3.5 rounded-xl shadow-xs">
+        <span class="text-[11px] font-medium text-slate-500 block">নির্বাচিত পেয়ার</span>
+        <strong id="m-pair" class="text-base font-extrabold text-blue-700">SQURPHARMA / BDT</strong>
       </div>
-      <div class="bg-[#0B132B] border border-slate-800 p-3.5 rounded-xl">
-        <span class="text-[11px] text-slate-400 block">বর্তমান বাজার দর</span>
-        <strong id="m-price" class="text-base font-extrabold text-white">লোড হচ্ছে...</strong>
+      <div class="bg-white border border-slate-200 p-3.5 rounded-xl shadow-xs">
+        <span class="text-[11px] font-medium text-slate-500 block">বর্তমান বাজার দর</span>
+        <strong id="m-price" class="text-base font-extrabold text-slate-900">লোড হচ্ছে...</strong>
       </div>
-      <div class="bg-[#0B132B] border border-slate-800 p-3.5 rounded-xl">
-        <span class="text-[11px] text-slate-400 block">MukiSoft ML সিগন্যাল</span>
-        <strong id="m-signal" class="text-sm font-bold text-emerald-400">--</strong>
+      <div class="bg-white border border-slate-200 p-3.5 rounded-xl shadow-xs">
+        <span class="text-[11px] font-medium text-slate-500 block">MukiSoft ML সিগন্যাল</span>
+        <strong id="m-signal" class="text-sm font-bold text-emerald-700">--</strong>
       </div>
-      <div class="bg-[#0B132B] border border-slate-800 p-3.5 rounded-xl">
-        <span class="text-[11px] text-slate-400 block">সম্ভাব্য টার্গেট</span>
-        <strong id="m-target" class="text-base font-extrabold text-emerald-400">--</strong>
+      <div class="bg-white border border-slate-200 p-3.5 rounded-xl shadow-xs">
+        <span class="text-[11px] font-medium text-slate-500 block">সম্ভাব্য টার্গেট</span>
+        <strong id="m-target" class="text-base font-extrabold text-emerald-700">--</strong>
       </div>
-      <div class="bg-[#0B132B] border border-slate-800 p-3.5 rounded-xl col-span-2 sm:col-span-1">
-        <span class="text-[11px] text-slate-400 block">নিরাপদ স্টপ-লস</span>
-        <strong id="m-stoploss" class="text-base font-extrabold text-rose-400">--</strong>
+      <div class="bg-white border border-slate-200 p-3.5 rounded-xl shadow-xs col-span-2 sm:col-span-1">
+        <span class="text-[11px] font-medium text-slate-500 block">নিরাপদ স্টপ-লস</span>
+        <strong id="m-stoploss" class="text-base font-extrabold text-rose-700">--</strong>
       </div>
     </div>
 
-    <!-- Main TradingView Interactive Chart Workspace -->
-    <div class="bg-[#0B132B] border border-slate-800 rounded-2xl p-4 shadow-2xl space-y-2">
-      <div class="flex flex-wrap items-center justify-between text-xs text-slate-400 px-1">
+    <!-- Main Light-Theme TradingView Chart Workspace -->
+    <div class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm space-y-2">
+      <div class="flex flex-wrap items-center justify-between text-xs text-slate-500 px-1">
         <div class="flex items-center gap-3">
-          <span class="font-bold text-white" id="chart-legend-title">SQURPHARMA (DSE)</span>
-          <span class="text-amber-400">● SMA(20)</span>
-          <span class="text-cyan-400">● EMA(20)</span>
-          <span class="text-purple-400">● BB(20,2)</span>
+          <span class="font-bold text-slate-900" id="chart-legend-title">SQURPHARMA (DSE)</span>
+          <span class="text-amber-600 font-semibold">SMA(20)</span>
+          <span class="text-sky-600 font-semibold">EMA(20)</span>
+          <span class="text-purple-600 font-semibold">BB(20,2)</span>
         </div>
         <span>মাউস হুইল দিয়ে জুম ও ড্র্যাগ করে স্ক্রল করুন</span>
       </div>
 
-      <!-- Primary Candlestick + Overlays Chart -->
-      <div id="tv-main-chart" class="w-full h-[420px] rounded-xl overflow-hidden border border-slate-800/80"></div>
+      <div id="tv-main-chart" class="w-full h-[420px] rounded-xl overflow-hidden border border-slate-200"></div>
 
-      <!-- Secondary RSI (14) Oscillator Chart -->
       <div id="rsi-wrapper" class="pt-2">
-        <div class="text-[11px] font-semibold text-emerald-400 mb-1 px-1">RSI (14) Momentum Oscillator (70 Overbought / 30 Oversold)</div>
-        <div id="tv-rsi-chart" class="w-full h-[140px] rounded-xl overflow-hidden border border-slate-800/80"></div>
+        <div class="text-[11px] font-bold text-emerald-700 mb-1 px-1">RSI (14) Momentum Oscillator (70 Overbought / 30 Oversold)</div>
+        <div id="tv-rsi-chart" class="w-full h-[140px] rounded-xl overflow-hidden border border-slate-200"></div>
       </div>
     </div>
 
-    <!-- Live AI Summary Footer Box -->
-    <div class="bg-gradient-to-r from-blue-950/40 via-[#0B132B] to-slate-900 border border-blue-500/30 p-5 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-4">
+    <!-- Live AI Summary Box -->
+    <div class="bg-blue-50/70 border border-blue-200 p-5 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-4">
       <div>
-        <h3 class="text-xs font-bold text-blue-400 uppercase tracking-wider mb-1">💡 MukiSoft AI কুইক ট্রেড সামারি</h3>
-        <p id="m-ai-summary" class="text-sm text-slate-200 leading-relaxed">চার্ট ও ইন্ডিকেটর ডেটা বিশ্লেষণ করা হচ্ছে...</p>
+        <h3 class="text-xs font-bold text-blue-800 uppercase tracking-wider mb-1">MukiSoft AI কুইক ট্রেড সামারি</h3>
+        <p id="m-ai-summary" class="text-sm text-slate-800 font-medium leading-relaxed">চার্ট ও ইন্ডিকেটর ডেটা বিশ্লেষণ করা হচ্ছে...</p>
       </div>
-      <a id="bottom-report-btn" href="analyzer.html?symbol=SQURPHARMA&exchange=DSE" class="shrink-0 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold px-6 py-3 rounded-xl transition text-center">
-        বিস্তারিত অ্যানালাইজারে যান →
+      <a id="bottom-report-btn" href="analyzer.html?symbol=SQURPHARMA&exchange=DSE" class="shrink-0 bg-blue-700 hover:bg-blue-800 text-white text-xs font-bold px-6 py-3 rounded-xl transition text-center">
+        বিস্তারিত অ্যানালাইজারে যান
       </a>
     </div>
 
   </main>
 
-  <footer class="border-t border-slate-800/80 bg-[#040812] py-6 text-center text-xs text-slate-500">
+  <footer class="border-t border-slate-200 bg-white py-6 text-center text-xs text-slate-500">
     © 2026 MukiSoft Technology • DSE & CSE Pro TradingView Chart Terminal
   </footer>
 
   <script>
     const API_BASE_URL = "https://mukisoft-stock-ai.onrender.com";
 
-    // Complete DSE & CSE Sectors & Pairs Directory
     const ALL_SECTORS_PAIRS = {
       "Pharmaceuticals & Chemicals": ["SQURPHARMA", "RENATA", "BXPHARMA", "ACI", "ACIFORMULA", "ACMEPL", "BEACONPHAR", "ORIONPHARM", "ORIONINFU", "IBNSINA", "MARICO", "RECKITTBEN", "GLAXOSMITH", "ACTIVEFINE", "ADVENT", "AMBEEPHA", "CENTRALPHL", "FARCHEM", "GHCL", "IMAMBUTTON", "INDOBANGLA", "JHRML", "KEYACOSMET", "KOHINOOR", "LIBRAINFU", "NAVANAPHAR", "PHARMAID", "SALVOCHEM", "SILCOPHL", "SILVAPHL", "WATACHEM"],
       "Bank": ["BRACBANK", "CITYBANK", "DUTCHBANGL", "EBL", "ISLAMIBANK", "PUBALIBANK", "PRIMEBANK", "MTB", "UCB", "BANKASIA", "DHAKABANK", "EXIMBANK", "FIRSTSBANK", "IFIC", "JAMUNABANK", "MERCANBANK", "MIDLANDBNK", "NBL", "NCCBANK", "NRBBANK", "NRBCBANK", "ONEBANKPLC", "PREMIERBAN", "RUPALIBANK", "SBACBANK", "SHAHJABANK", "SIBL", "SOUTHEASTB", "STANDBANKL", "TRUSTBANK", "UNIONBANK", "UTTARABANK"],
@@ -200,13 +188,7 @@
     let mainChart, rsiChart;
     let candleSeries, volumeSeries, smaSeries, emaSeries, bbUpperSeries, bbLowerSeries, rsiSeries;
 
-    const indicatorState = {
-      sma: true,
-      ema: true,
-      bb: true,
-      vol: true,
-      rsi: true
-    };
+    const indicatorState = { sma: true, ema: true, bb: true, vol: true, rsi: true };
 
     document.addEventListener("DOMContentLoaded", () => {
       const menuBtn = document.getElementById("mobile-menu-btn");
@@ -214,7 +196,6 @@
       if (menuBtn && mobileMenu) {
         menuBtn.addEventListener("click", () => mobileMenu.classList.toggle("hidden"));
       }
-
       initPairSelectors();
       initCharts();
       loadProChart();
@@ -242,15 +223,8 @@
         });
       }
 
-      sectorSel.addEventListener("change", () => {
-        populateStocks();
-        loadProChart();
-      });
-
-      stockSel.addEventListener("change", () => {
-        loadProChart();
-      });
-
+      sectorSel.addEventListener("change", () => { populateStocks(); loadProChart(); });
+      stockSel.addEventListener("change", () => { loadProChart(); });
       populateStocks();
     }
 
@@ -259,13 +233,12 @@
       const dseBtn = document.getElementById("tv-btn-dse");
       const cseBtn = document.getElementById("tv-btn-cse");
       if (ex === "DSE") {
-        dseBtn.className = "flex-1 py-2 rounded-lg text-xs font-bold bg-blue-600 text-white transition";
-        cseBtn.className = "flex-1 py-2 rounded-lg text-xs font-bold text-slate-400 hover:text-white transition";
+        dseBtn.className = "flex-1 py-2 rounded-lg text-xs font-bold bg-blue-700 text-white transition cursor-pointer";
+        cseBtn.className = "flex-1 py-2 rounded-lg text-xs font-bold text-slate-600 hover:text-slate-900 transition cursor-pointer";
       } else {
-        cseBtn.className = "flex-1 py-2 rounded-lg text-xs font-bold bg-blue-600 text-white transition";
-        dseBtn.className = "flex-1 py-2 rounded-lg text-xs font-bold text-slate-400 hover:text-white transition";
+        cseBtn.className = "flex-1 py-2 rounded-lg text-xs font-bold bg-blue-700 text-white transition cursor-pointer";
+        dseBtn.className = "flex-1 py-2 rounded-lg text-xs font-bold text-slate-600 hover:text-slate-900 transition cursor-pointer";
       }
-      // Update option labels
       const stockSel = document.getElementById("tv-stock-select");
       Array.from(stockSel.options).forEach((opt) => {
         opt.innerText = `${opt.value} / BDT (${currentExchange})`;
@@ -276,22 +249,22 @@
     function initCharts() {
       const mainContainer = document.getElementById("tv-main-chart");
       mainChart = LightweightCharts.createChart(mainContainer, {
-        layout: { background: { type: "solid", color: "#060B19" }, textColor: "#94a3b8" },
-        grid: { vertLines: { color: "rgba(148, 163, 184, 0.07)" }, horzLines: { color: "rgba(148, 163, 184, 0.07)" } },
+        layout: { background: { type: "solid", color: "#FFFFFF" }, textColor: "#334155" },
+        grid: { vertLines: { color: "#F1F5F9" }, horzLines: { color: "#F1F5F9" } },
         crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
-        rightPriceScale: { borderColor: "#1e293b" },
-        timeScale: { borderColor: "#1e293b", timeVisible: true },
+        rightPriceScale: { borderColor: "#CBD5E1" },
+        timeScale: { borderColor: "#CBD5E1", timeVisible: true },
         handleScroll: { mouseWheel: true, pressedMouseMove: true },
         handleScale: { axisPressedMouseMove: true, mouseWheel: true, pinch: true }
       });
 
       candleSeries = mainChart.addCandlestickSeries({
-        upColor: "#10b981",
-        downColor: "#f43f5e",
-        borderUpColor: "#10b981",
-        borderDownColor: "#f43f5e",
-        wickUpColor: "#10b981",
-        wickDownColor: "#f43f5e"
+        upColor: "#059669",
+        downColor: "#E11D48",
+        borderUpColor: "#059669",
+        borderDownColor: "#E11D48",
+        wickUpColor: "#059669",
+        wickDownColor: "#E11D48"
       });
 
       volumeSeries = mainChart.addHistogramSeries({
@@ -300,25 +273,23 @@
       });
       mainChart.priceScale("").applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
 
-      smaSeries = mainChart.addLineSeries({ color: "#f59e0b", lineWidth: 2, title: "SMA 20" });
-      emaSeries = mainChart.addLineSeries({ color: "#06b6d4", lineWidth: 2, title: "EMA 20" });
-      bbUpperSeries = mainChart.addLineSeries({ color: "rgba(168, 85, 247, 0.7)", lineWidth: 1, lineStyle: 2, title: "BB Upper" });
-      bbLowerSeries = mainChart.addLineSeries({ color: "rgba(168, 85, 247, 0.7)", lineWidth: 1, lineStyle: 2, title: "BB Lower" });
+      smaSeries = mainChart.addLineSeries({ color: "#D97706", lineWidth: 2, title: "SMA 20" });
+      emaSeries = mainChart.addLineSeries({ color: "#0284C7", lineWidth: 2, title: "EMA 20" });
+      bbUpperSeries = mainChart.addLineSeries({ color: "rgba(126, 34, 206, 0.65)", lineWidth: 1, lineStyle: 2, title: "BB Upper" });
+      bbLowerSeries = mainChart.addLineSeries({ color: "rgba(126, 34, 206, 0.65)", lineWidth: 1, lineStyle: 2, title: "BB Lower" });
 
-      // RSI Sub-Chart
       const rsiContainer = document.getElementById("tv-rsi-chart");
       rsiChart = LightweightCharts.createChart(rsiContainer, {
-        layout: { background: { type: "solid", color: "#060B19" }, textColor: "#94a3b8" },
-        grid: { vertLines: { color: "rgba(148, 163, 184, 0.07)" }, horzLines: { color: "rgba(148, 163, 184, 0.07)" } },
-        rightPriceScale: { borderColor: "#1e293b" },
+        layout: { background: { type: "solid", color: "#FFFFFF" }, textColor: "#334155" },
+        grid: { vertLines: { color: "#F1F5F9" }, horzLines: { color: "#F1F5F9" } },
+        rightPriceScale: { borderColor: "#CBD5E1" },
         timeScale: { visible: false }
       });
 
-      rsiSeries = rsiChart.addLineSeries({ color: "#10b981", lineWidth: 2, title: "RSI(14)" });
-      rsiSeries.createPriceLine({ price: 70, color: "#f43f5e", lineWidth: 1, lineStyle: 2, title: "Overbought" });
-      rsiSeries.createPriceLine({ price: 30, color: "#3b82f6", lineWidth: 1, lineStyle: 2, title: "Oversold" });
+      rsiSeries = rsiChart.addLineSeries({ color: "#059669", lineWidth: 2, title: "RSI(14)" });
+      rsiSeries.createPriceLine({ price: 70, color: "#E11D48", lineWidth: 1, lineStyle: 2, title: "Overbought" });
+      rsiSeries.createPriceLine({ price: 30, color: "#1D4ED8", lineWidth: 1, lineStyle: 2, title: "Oversold" });
 
-      // Sync time scales between Main Chart and RSI Chart
       mainChart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
         if (range) rsiChart.timeScale().setVisibleLogicalRange(range);
       });
@@ -336,10 +307,10 @@
 
       if (active) {
         btn.classList.remove("opacity-40");
-        btn.innerText = btn.innerText.replace("✕", "✓");
+        btn.innerText = btn.innerText.replace("OFF", "ON");
       } else {
         btn.classList.add("opacity-40");
-        btn.innerText = btn.innerText.replace("✓", "✕");
+        btn.innerText = btn.innerText.replace("ON", "OFF");
       }
 
       if (key === "sma") smaSeries.applyOptions({ visible: active });
@@ -359,10 +330,9 @@
       rsiChart.timeScale().fitContent();
     }
 
-    // Technical Indicator Calculators from Closing Prices
     function computeIndicators(ohlc) {
       const smaData = [], emaData = [], bbUp = [], bbLow = [], rsiData = [];
-      const period = 5; // Adaptive window for 30-day live history
+      const period = 5;
       let prevEma = ohlc[0].close;
       const k = 2 / (period + 1);
 
@@ -370,11 +340,9 @@
         const c = ohlc[i].close;
         const time = ohlc[i].time;
 
-        // EMA
         prevEma = i === 0 ? c : c * k + prevEma * (1 - k);
         emaData.push({ time, value: Number(prevEma.toFixed(2)) });
 
-        // SMA & Bollinger Bands
         const slice = ohlc.slice(Math.max(0, i - period + 1), i + 1).map((d) => d.close);
         const mean = slice.reduce((a, b) => a + b, 0) / slice.length;
         const std = Math.sqrt(slice.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / slice.length) || c * 0.015;
@@ -382,7 +350,6 @@
         bbUp.push({ time, value: Number((mean + 2 * std).toFixed(2)) });
         bbLow.push({ time, value: Number((mean - 2 * std).toFixed(2)) });
 
-        // RSI
         let gains = 0, losses = 0;
         for (let j = Math.max(1, i - 6); j <= i; j++) {
           const diff = ohlc[j].close - ohlc[j - 1].close;
@@ -444,7 +411,7 @@
           volData.push({
             time: timeStr,
             value: Math.round(Math.abs(close - open) * 50000 + 80000),
-            color: close >= open ? "rgba(16, 185, 129, 0.35)" : "rgba(244, 63, 94, 0.35)"
+            color: close >= open ? "rgba(5, 150, 105, 0.35)" : "rgba(225, 29, 72, 0.35)"
           });
         });
 

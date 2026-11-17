@@ -3,43 +3,57 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>About Us — MukiSoft Stock AI</title>
+  <title>About Us — MukiSoft AI</title>
+  <link rel="icon" type="image/svg+xml" href="assets/logo.svg" />
   <script src="https://cdn.tailwindcss.com"></script>
   <link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
   <style>body { font-family: 'Inter', 'Hind Siliguri', sans-serif; }</style>
 </head>
-<body class="bg-[#060B19] text-slate-100 min-h-screen flex flex-col">
-  <header class="sticky top-0 z-50 bg-[#060B19]/90 backdrop-blur-xl border-b border-slate-800/80">
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-      <a href="index.html" class="flex items-center gap-3">
-        <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 to-cyan-500 flex items-center justify-center font-extrabold text-white text-lg">M</div>
-        <span class="text-lg font-extrabold text-white">MukiSoft <span class="text-blue-400">Stock AI</span></span>
+<body class="bg-slate-50 text-slate-900 min-h-screen flex flex-col">
+  <header class="sticky top-0 z-50 bg-white/95 backdrop-blur-md border-b border-slate-200/90 shadow-xs">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-18 py-3 flex items-center justify-between">
+      <a href="index.html" class="flex items-center">
+        <img src="assets/logo.svg" alt="MukiSoft AI" class="h-11 w-auto" />
       </a>
-      <nav class="hidden md:flex items-center gap-1 bg-slate-900/80 p-1 rounded-xl border border-slate-800">
-        <a href="index.html" class="px-4 py-2 rounded-lg text-sm font-medium text-slate-300 hover:bg-slate-800">হোম (Home)</a>
-        <a href="analyzer.html" class="px-4 py-2 rounded-lg text-sm font-medium text-slate-300 hover:bg-slate-800">AI অ্যানালাইজার</a>
-        <a href="market.html" class="px-4 py-2 rounded-lg text-sm font-medium text-slate-300 hover:bg-slate-800">DSE / CSE মার্কেট</a>
-        <a href="about.html" class="px-4 py-2 rounded-lg text-sm font-semibold bg-blue-600 text-white">আমাদের সম্পর্কে</a>
-        <a href="contact.html" class="px-4 py-2 rounded-lg text-sm font-medium text-slate-300 hover:bg-slate-800">যোগাযোগ</a>
+      <nav class="hidden md:flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200/80">
+        <a href="index.html" class="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:text-slate-900">হোম (Home)</a>
+        <a href="analyzer.html" class="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:text-slate-900">AI অ্যানালাইজার</a>
+        <a href="market.html" class="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:text-slate-900">DSE / CSE মার্কেট</a>
+        <a href="about.html" class="px-4 py-2 rounded-lg text-sm font-semibold bg-white text-blue-700 shadow-xs">আমাদের সম্পর্কে</a>
+        <a href="contact.html" class="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:text-slate-900">যোগাযোগ</a>
       </nav>
     </div>
   </header>
 
-  <main class="max-w-4xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-12 flex-1 space-y-6">
-    <h1 class="text-3xl font-extrabold text-white">MukiSoft Stock AI সম্পর্কে</h1>
-    <p class="text-slate-300 leading-relaxed">
-      <strong>MukiSoft Stock AI</strong> হলো বাংলাদেশের পুঁজিবাজার (ঢাকা স্টক এক্সচেঞ্জ এবং চট্টগ্রাম স্টক এক্সচেঞ্জ)-এর জন্য তৈরি একটি আধুনিক কোয়ান্টিটেটিভ অ্যানালাইসিস ও মেশিন লার্নিং প্ল্যাটফর্ম। এটি <strong>MukiSoft Technology</strong>-এর একটি ফ্ল্যাগশিপ ফিনটেক উদ্যোগ।
-    </p>
-    <div class="bg-[#0B132B] border border-slate-800 p-6 rounded-2xl space-y-3">
-      <h2 class="text-xl font-bold text-blue-400">আমাদের প্রযুক্তিগত সক্ষমতা</h2>
-      <ul class="list-disc list-inside text-slate-300 text-sm space-y-2">
-        <li><strong>XGBoost Quantitative Classifier:</strong> ৯৯.৮৮% ভ্যালিডেশন অ্যাকুরেসিসম্পন্ন মাল্টি-ফ্যাক্টর টেকনিক্যাল মডেল।</li>
-        <li><strong>১৭টি লাইভ ইন্ডিকেটর:</strong> RSI (14), SMA (20), EMA (20), MACD, Bollinger Bands এবং ভলিউম রেশিও বিশ্লেষণ।</li>
-         </ul>
+  <main class="max-w-4xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-12 flex-1 space-y-8">
+    <div class="bg-white border border-slate-200 rounded-2xl p-8 shadow-xs space-y-4">
+      <span class="text-xs font-bold uppercase tracking-widest text-blue-700">MukiSoft Technology</span>
+      <h1 class="text-3xl font-extrabold text-slate-900">MukiSoft AI সম্পর্কে</h1>
+      <p class="text-slate-600 leading-relaxed">
+        <strong>MukiSoft AI</strong> হলো বাংলাদেশের পুঁজিবাজার (ঢাকা স্টক এক্সচেঞ্জ এবং চট্টগ্রাম স্টক এক্সচেঞ্জ)-এর জন্য তৈরি একটি ইন্সটিটিউশনাল-গ্রেড কোয়ান্টিটেটিভ অ্যানালাইসিস ও মেশিন লার্নিং প্ল্যাটফর্ম। এটি <strong>MukiSoft Technology</strong>-এর একটি উদ্ভাবনী ফিনটেক উদ্যোগ।
+      </p>
+    </div>
+
+    <div class="bg-white border border-slate-200 p-8 rounded-2xl shadow-xs space-y-4">
+      <h2 class="text-xl font-bold text-slate-900">আমাদের কোয়ান্টিটেটিভ ইঞ্জিন ও প্রযুক্তি</h2>
+      <ul class="space-y-3 text-slate-700 text-sm">
+        <li class="p-4 rounded-xl bg-slate-50 border border-slate-200/80">
+          <strong class="text-blue-700 block mb-1">৯৯.৮৮% ভ্যালিডেটেড অ্যাকুরেসি মডেল:</strong>
+          DSE ও CSE-এর ঐতিহাসিক প্রাইস অ্যাকশন এবং ভলিউম প্যাটার্নের ওপর ট্রেন করা XGBoost ক্লাসিফায়ার মডেল।
+        </li>
+        <li class="p-4 rounded-xl bg-slate-50 border border-slate-200/80">
+          <strong class="text-blue-700 block mb-1">১৭টি লাইভ টেকনিক্যাল ইন্ডিকেটর:</strong>
+          RSI (14), SMA (20), EMA (20), MACD, Bollinger Bands এবং ভলিউম রেশিও বিশ্লেষণ করে রিয়েল-টাইম সিদ্ধান্ত।
+        </li>
+        <li class="p-4 rounded-xl bg-slate-50 border border-slate-200/80">
+          <strong class="text-blue-700 block mb-1">সহজ বাংলায় ট্রেডিং গাইডলাইন:</strong>
+          সাধারণ বিনিয়োগকারীদের বোধগম্য ভাষায় তাৎক্ষণিক সারসংক্ষেপ, সম্ভাব্য টার্গেট প্রাইস এবং স্টপ-লস নির্দেশনা।
+        </li>
+      </ul>
     </div>
   </main>
 
-  <footer class="border-t border-slate-800/80 bg-[#040812] py-6 text-center text-xs text-slate-500">
+  <footer class="border-t border-slate-200 bg-white py-6 text-center text-xs text-slate-500">
     © 2026 MukiSoft Technology • All Rights Reserved
   </footer>
 </body>
