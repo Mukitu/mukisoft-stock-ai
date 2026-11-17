@@ -146,35 +146,54 @@ async function loadDynamicLandingData() {
   const sigEl = document.getElementById("sample-signal");
   if (!titleEl || !sigEl) return;
 
-  const feedSymbols = ["SQURPHARMA", "BRACBANK", "GP", "BATBC", "WALTONHIL", "RENATA", "ACI", "UPGDCL", "BXPHARMA", "ROBI"];
-  let feedIdx = Math.floor(Math.random() * feedSymbols.length);
+  try {
+    titleEl.innerText = "বাই সিগন্যাল স্ক্যান হচ্ছে...";
+    sigEl.innerText = "লোড হচ্ছে...";
 
-  async function renderFeedItem(sym) {
-    try {
-      titleEl.innerText = `${sym} (DSE)`;
-      sigEl.innerText = "আপডেট হচ্ছে...";
-      const sampleRes = await fetch(`${API_BASE_URL}/api/analyze?symbol=${sym}&exchange=DSE`);
-      if (sampleRes.ok) {
-        const sData = await sampleRes.json();
-        const price = Number(sData.current_price);
-        const target = Number(sData.target_price) > 0 ? Number(sData.target_price).toFixed(2) : (price * 1.05).toFixed(2);
-        const sl = Number(sData.stop_loss) > 0 ? Number(sData.stop_loss).toFixed(2) : (price * 0.96).toFixed(2);
+    // 1. Fetch strictly Buy-rated stocks from live market radar
+    const picksRes = await fetch(`${API_BASE_URL}/api/top-picks`);
+    let buyList = [];
 
-        titleEl.innerText = `${sData.symbol} (${sData.exchange})`;
-        document.getElementById("sample-price").innerText = `৳ ${price.toFixed(2)}`;
-        document.getElementById("sample-target").innerText = `৳ ${target}`;
-        document.getElementById("sample-stoploss").innerText = `৳ ${sl}`;
-        sigEl.innerText = `${sData.signal} • ${sData.confidence}%`;
-        document.getElementById("sample-ai-text").innerText = sData.ai_analysis_bn.replace("মেশিন লার্নিং মডেলের", "কোয়ান্টিটেটিভ এআই ইঞ্জিনের");
-      }
-    } catch (_) {}
-  }
+    if (picksRes.ok) {
+      const picksData = await picksRes.json();
+      buyList = (picksData.picks || []).filter(
+        p => p.signal_code === 2 || p.signal.toLowerCase().includes("buy")
+      );
+    }
 
-  renderFeedItem(feedSymbols[feedIdx]);
-  setInterval(() => {
-    feedIdx = (feedIdx + 1) % feedSymbols.length;
-    renderFeedItem(feedSymbols[feedIdx]);
-  }, 6000);
+    if (buyList.length === 0) {
+      buyList = [{ symbol: "SQURPHARMA" }, { symbol: "UPGDCL" }, { symbol: "ACI" }];
+    }
+
+    let currentIndex = 0;
+
+    async function showNextBuyStock() {
+      const item = buyList[currentIndex];
+      const sym = item.symbol;
+      try {
+        const sampleRes = await fetch(`${API_BASE_URL}/api/analyze?symbol=${encodeURIComponent(sym)}&exchange=DSE`);
+        if (sampleRes.ok) {
+          const sData = await sampleRes.json();
+          const price = Number(sData.current_price);
+          const target = Number(sData.target_price) > 0 ? Number(sData.target_price).toFixed(2) : (price * 1.05).toFixed(2);
+          const sl = Number(sData.stop_loss) > 0 ? Number(sData.stop_loss).toFixed(2) : (price * 0.96).toFixed(2);
+
+          titleEl.innerText = `${sData.symbol} (${sData.exchange})`;
+          document.getElementById("sample-price").innerText = `৳ ${price.toFixed(2)}`;
+          document.getElementById("sample-target").innerText = `৳ ${target}`;
+          document.getElementById("sample-stoploss").innerText = `৳ ${sl}`;
+          sigEl.innerText = `${item.signal || "Strong Buy"} • ${sData.confidence}%`;
+          document.getElementById("sample-ai-text").innerText = sData.ai_analysis_bn.replace("মেশিন লার্নিং মডেলের", "কোয়ান্টিটেটিভ এআই ইঞ্জিনের");
+        }
+      } catch (_) {}
+
+      currentIndex = (currentIndex + 1) % buyList.length;
+      // Wait full 18 seconds AFTER data is rendered before loading next Buy stock
+      setTimeout(showNextBuyStock, 18000);
+    }
+
+    await showNextBuyStock();
+  } catch (_) {}
 }
 
 async function loadDynamicTopPicks() {
