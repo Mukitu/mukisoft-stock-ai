@@ -301,7 +301,7 @@ async function runStockAnalysis(e) {
 
   fallbackBox.classList.add("hidden");
   resultBox.classList.add("hidden");
-  document.getElementById("loader-text").innerText = `${symbol} (${selectedExchange})-এর রিয়েল-টাইম ডেটা স্ক্র্যাপ করা হচ্ছে...`;
+  document.getElementById("loader-text").innerText = `${symbol} (${selectedExchange})-এর রিয়েল-টাইম ডেটা সংগ্রহ ও বিশ্লেষণ করা হচ্ছে...`;
   loader.classList.remove("hidden");
   submitBtn.disabled = true;
 
