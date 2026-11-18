@@ -90,8 +90,7 @@ function buildInstitutionalAnalysis(data) {
     `• আজকের প্রাইস অ্যাকশন: ওপেনিং দর ছিল ৳${dayOpen.toFixed(2)}, সাম্প্রতিক সর্বনিম্ন ৳${dayLow.toFixed(2)} এবং সর্বোচ্চ ৳${dayHigh.toFixed(2)}।`,
     `• টেকনিক্যাল ও চার্ট বিশ্লেষণ: RSI (14) বর্তমানে ${rsi.toFixed(1)} লেভেলে রয়েছে। ${trendDesc}`,
     `${entryPlan} ঝুঁকি নিয়ন্ত্রণে স্টপ-লস ৳${s1.toFixed(2)} অনুসরণ করুন।`
-  ].join("
-");
+  ].join(String.fromCharCode(10));
 
   return { actionType, badgeText, s1, s2, r1, r2, fullReport };
 }
