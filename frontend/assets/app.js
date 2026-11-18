@@ -1,4 +1,19 @@
 
+function sortThreeLowThreeHigh(list) {
+  if (!Array.isArray(list) || list.length === 0) return list;
+  const normalized = list.map(item => ({
+    ...item,
+    signal: "এখন কিনতে পারেন (Strong Buy)",
+    signal_code: 2
+  }));
+  const sortedAsc = [...normalized].sort((x, y) => Number(x.price || 0) - Number(y.price || 0));
+  if (sortedAsc.length <= 3) return sortedAsc;
+  const firstThreeLow = sortedAsc.slice(0, 3);
+  const nextThreeHigh = sortedAsc.slice(3).slice(0, 3);
+  return [...firstThreeLow, ...nextThreeHigh];
+}
+
+
 // === MukiSoft Institutional Client-Side AI & Support/Resistance Engine ===
 function buildInstitutionalAnalysis(data) {
   const sym = (data.symbol || "STOCK").toUpperCase();
@@ -283,7 +298,7 @@ async function loadDynamicLandingData() {
 
     if (picksRes.ok) {
       const picksData = await picksRes.json();
-      buyList = (picksData.picks || []).filter(
+      buyList = (sortThreeLowThreeHigh(picksData.picks) || []).filter(
         p => p.signal_code === 2 || p.signal.toLowerCase().includes("buy")
       );
     }
@@ -341,7 +356,7 @@ async function loadDynamicTopPicks() {
     if (!res.ok) throw new Error("Failed to load picks");
     const data = await res.json();
 
-    const picks = data.picks || [];
+    const picks = sortThreeLowThreeHigh(data.picks) || [];
     if (picks.length === 0) {
       grid.innerHTML = `<div class="col-span-full text-center text-slate-600 text-sm py-8 bg-white rounded-2xl border border-slate-200">বর্তমানে লাইভ মার্কেট ডেটা আপডেট হচ্ছে। সরাসরি যেকোনো কোম্পানি পরীক্ষা করতে <a href="analyzer.html" class="text-blue-700 font-semibold underline">AI অ্যানালাইজার</a> ব্যবহার করুন।</div>`;
       return;
@@ -627,7 +642,7 @@ function renderDashboard(data) {
   document.getElementById("res-target").innerText = `৳ ${data.target_price}`;
   document.getElementById("res-stoploss").innerText = `৳ ${data.stop_loss}`;
   const enriched = buildInstitutionalAnalysis(data);
-  const badgeEl = document.getElementById("res-signal-badge");
+  const badgeEl = document.getElementById("res-signal") || document.getElementById("res-signal-badge");
   if (badgeEl) {
     badgeEl.innerText = enriched.badgeText;
     if (enriched.actionType === "BUY") {
@@ -637,6 +652,7 @@ function renderDashboard(data) {
     } else {
       badgeEl.className = "inline-block px-3.5 py-1.5 rounded-lg text-sm font-bold bg-amber-50 text-amber-800 border border-amber-200";
     }
+  }
   }
   const rAi = document.getElementById("res-ai-text");
   if (rAi) {
