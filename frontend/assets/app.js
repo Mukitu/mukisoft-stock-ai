@@ -1,3 +1,36 @@
+
+// Dynamic Hero Slideshow from 3:00 PM Daily Trained Exclusive Picks
+function startDynamicHeroSlideshow(picks) {
+  if (!picks || !picks.length) return;
+  let idx = 0;
+  const renderSlide = () => {
+    const item = picks[idx % picks.length];
+    const symEl = document.getElementById("sample-symbol");
+    const badgeEl = document.getElementById("sample-badge");
+    const priceEl = document.getElementById("sample-price");
+    const targetEl = document.getElementById("sample-target");
+    const stopEl = document.getElementById("sample-stoploss");
+    const aiEl = document.getElementById("sample-ai-text");
+
+    if (symEl) symEl.innerText = `${item.symbol} (DSE)`;
+    if (badgeEl) {
+      badgeEl.innerText = item.signal || "এখন কিনতে পারেন";
+      badgeEl.className = "px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200";
+    }
+    if (priceEl) priceEl.innerText = `৳ ${Number(item.price).toFixed(2)}`;
+    if (targetEl) targetEl.innerText = `৳ ${item.target_price}`;
+    if (stopEl) stopEl.innerText = `৳ ${item.stop_loss}`;
+    if (aiEl) {
+      aiEl.style.whiteSpace = "pre-line";
+      aiEl.innerText = item.ai_analysis_bn || `✅ বিকাল ৩:০০টার AI মডেল বিশ্লেষণে ${item.symbol} শেয়ারটি আগামীকাল সকাল ১০:০০টায় বাই করার জন্য নির্বাচিত হয়েছে। সম্ভাব্য টার্গেট ৳${item.target_price} এবং নিরাপদ স্টপ-লস ৳${item.stop_loss}।`;
+    }
+    idx++;
+  };
+  renderSlide();
+  if (window._heroSlideTimer) clearInterval(window._heroSlideTimer);
+  window._heroSlideTimer = setInterval(renderSlide, 4500);
+}
+
 async function cachedFetchJson(url, cacheKey, ttlMs = 120000) {
   try {
     const raw = localStorage.getItem(cacheKey);
@@ -523,9 +556,9 @@ function renderDashboard(data) {
 
   const badge = document.getElementById("res-signal-badge");
   badge.innerText = data.signal;
-  if (data.signal_code === 2) {
+  if (data.signal_code === 2 || (data.signal && data.signal.includes("কিনতে"))) {
     badge.className = "inline-block px-3.5 py-1.5 rounded-lg text-sm font-bold bg-emerald-50 text-emerald-700 border border-emerald-200";
-  } else if (data.signal_code === 0) {
+  } else if (data.signal_code === 0 || (data.signal && data.signal.includes("বিক্রি"))) {
     badge.className = "inline-block px-3.5 py-1.5 rounded-lg text-sm font-bold bg-rose-50 text-rose-700 border border-rose-200";
   } else {
     badge.className = "inline-block px-3.5 py-1.5 rounded-lg text-sm font-bold bg-amber-50 text-amber-800 border border-amber-200";

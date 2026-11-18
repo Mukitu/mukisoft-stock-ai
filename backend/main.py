@@ -1,3 +1,20 @@
+import time, asyncio, datetime
+FAST_CACHE = {}
+DAILY_PICKS_CACHE = {"date_key": "", "data": None}
+CACHE_TTL = 300
+
+def get_bst_now():
+    return datetime.datetime.utcnow() + datetime.timedelta(hours=6)
+
+def get_market_cycle_key():
+    # Resets every day at 3:00 PM (15:00) BST after market closes at 2:30 PM
+    now = get_bst_now()
+    if now.hour < 15:
+        cycle_date = (now - datetime.timedelta(days=1)).strftime("%Y-%m-%d")
+    else:
+        cycle_date = now.strftime("%Y-%m-%d")
+    return f"cycle_{cycle_date}_1500"
+
 import time
 FAST_CACHE = {}
 CACHE_TTL = 180
@@ -558,3 +575,14 @@ async def analyze_document(
 
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"বিশ্লেষণ ব্যর্থ হয়েছে: {str(e)}")
+
+@app.on_event("startup")
+async def prewarm_daily_engine():
+    async def runner():
+        while True:
+            try:
+                await get_top_picks()
+            except Exception:
+                pass
+            await asyncio.sleep(600)  # Check every 10 mins; auto-retrains at 3:00 PM BST
+    asyncio.create_task(runner())
