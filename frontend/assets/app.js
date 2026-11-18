@@ -166,7 +166,13 @@ function buildInstitutionalAnalysis(data) {
     `${actionGuide} ঝুঁকি নিয়ন্ত্রণে স্টপ-লস ৳${s1.toFixed(2)} মেনে চলুন।`
   ].join(String.fromCharCode(10));
 
-  return { actionType, badgeText, s1, s2, r1, r2, fullReport };
+  const rawBackendAi = (data.ai_analysis_bn || "").trim();
+  const isGenericFallback = !rawBackendAi || rawBackendAi.includes("মেশিন লার্নিং মডেলের বিশ্লেষণে অবস্থান") || rawBackendAi.includes("চূড়ান্ত AI সিদ্ধান্ত");
+  const finalReport = isGenericFallback
+    ? fullReport
+    : fullReport + String.fromCharCode(10, 10) + "🤖 MukiSoft লাইভ AI ট্রেডার নোট: " + rawBackendAi;
+
+  return { actionType, badgeText, s1, s2, r1, r2, fullReport: finalReport };
 }
 
 if (!localStorage.getItem("ms_cache_v4")) { localStorage.clear(); localStorage.setItem("ms_cache_v4", "1"); }
