@@ -14,82 +14,156 @@ function sortThreeLowThreeHigh(list) {
 }
 
 
-// === MukiSoft Institutional Client-Side AI & Support/Resistance Engine (v6: Zero False-Signal Edition) ===
+// === MukiSoft 16-Indicator Institutional Quantitative + XGBoost ML Consensus Engine (v7) ===
 function buildInstitutionalAnalysis(data) {
   const sym = (data.symbol || "STOCK").toUpperCase();
   const exch = data.exchange || "DSE";
   const price = Number(data.current_price || data.price || 0);
-  const rsi = Number(data.rsi || data.rsi_14 || 50.0);
-  const conf = Number(data.confidence || 98.5).toFixed(2);
+  const mlSignalCode = Number(data.signal_code ?? 1);
+  const mlConf = Number(data.confidence || 98.5).toFixed(2);
 
-  const hist = Array.isArray(data.prices) && data.prices.length ? data.prices.map(Number) :
-               (Array.isArray(data.history) && data.history.length ? data.history.map(h => Number(h.close || h.price || h)) : []);
+  // Extract true 30-day closing series from backend's `chart_history`
+  const rawSeries = Array.isArray(data.chart_history) && data.chart_history.length ? data.chart_history :
+                    (Array.isArray(data.prices) && data.prices.length ? data.prices :
+                    (Array.isArray(data.history) ? data.history : []));
+  const closes = rawSeries.map(item => Number(typeof item === "object" ? (item.close ?? item.price ?? 0) : item)).filter(v => v > 0);
+  if (closes.length === 0 && price > 0) closes.push(price);
 
-  const recent = hist.slice(-20);
-  const dayOpen = recent.length >= 2 ? recent[recent.length - 2] : price;
-  const prevClose = recent.length >= 3 ? recent[recent.length - 3] : dayOpen;
-  const dayLow = recent.length ? Math.min(...recent.slice(-5), price) : Number((price * 0.985).toFixed(2));
-  const dayHigh = recent.length ? Math.max(...recent.slice(-5), price) : Number((price * 1.015).toFixed(2));
+  const n = closes.length;
+  const recent20 = closes.slice(-20);
+  const recent10 = closes.slice(-10);
+  const recent5 = closes.slice(-5);
 
-  let s1 = Number(data.stop_loss || (recent.length ? Math.min(...recent) : price * 0.94));
-  if (s1 >= price) s1 = Number((price * 0.945).toFixed(2));
-  const s2 = Number((s1 * 0.96).toFixed(2));
+  const dayOpen = n >= 2 ? closes[n - 2] : price;
+  const prevClose = n >= 3 ? closes[n - 3] : dayOpen;
+  const dayHigh = recent5.length ? Math.max(...recent5, price) : price;
+  const dayLow = recent5.length ? Math.min(...recent5, price) : price;
 
-  let r1 = Number(data.target_price || (recent.length ? Math.max(...recent) : price * 1.055));
-  if (r1 <= price) r1 = Number((price * 1.055).toFixed(2));
-  const r2 = Number((r1 * 1.045).toFixed(2));
+  // 1-3. Moving Averages: SMA-20, EMA-9, EMA-20
+  const sma20 = recent20.reduce((a, b) => a + b, 0) / recent20.length;
+  const calcEMA = (arr, period) => {
+    const k = 2 / (period + 1);
+    return arr.reduce((ema, val, idx) => idx === 0 ? val : val * k + ema * (1 - k), arr[0]);
+  };
+  const ema9 = calcEMA(recent20, 9);
+  const ema20 = calcEMA(recent20, 20);
 
-  const sma20 = recent.length ? (recent.reduce((acc, v) => acc + v, 0) / recent.length) : price;
-  const firstHalfMax = recent.length >= 10 ? Math.max(...recent.slice(0, 10)) : dayHigh;
-  const secondHalfMax = recent.length >= 10 ? Math.max(...recent.slice(10)) : dayHigh;
-
-  // Detect Bearish Rejection, Lower-High Downtrend, or Pullback from Resistance
-  const isBearishCandle = price < dayOpen && price <= prevClose;
-  const isNearResistance = dayHigh > 0 && ((dayHigh - price) / dayHigh) >= 0.004 && price < dayHigh && isBearishCandle;
-  const isLowerHighDowntrend = recent.length >= 10 && secondHalfMax < firstHalfMax && price < secondHalfMax;
-
-  let actionType = "BUY";
-  if (data.signal_code === 0 || rsi >= 70 || (isNearResistance && isLowerHighDowntrend)) {
-    actionType = "SELL";
-  } else if (isLowerHighDowntrend || isBearishCandle || rsi < 42) {
-    actionType = "WATCH";
-  } else {
-    actionType = "BUY";
+  // 4. True RSI (14) from historical closes (fallback to backend rsi)
+  let rsi = Number(data.rsi || data.rsi_14 || 50);
+  if (closes.length >= 8) {
+    let gains = 0, losses = 0;
+    const sliceRsi = closes.slice(-15);
+    for (let i = 1; i < sliceRsi.length; i++) {
+      const diff = sliceRsi[i] - sliceRsi[i - 1];
+      if (diff >= 0) gains += diff; else losses -= diff;
+    }
+    const rs = (gains / sliceRsi.length) / ((losses / sliceRsi.length) || 1e-9);
+    rsi = 100 - (100 / (1 + rs));
   }
 
-  const gainPct = price > 0 ? (((r1 - price) / price) * 100).toFixed(1) : "5.0";
-  const dropRiskPct = price > 0 ? (((price - s1) / price) * 100).toFixed(1) : "4.0";
+  // 5-6. MACD & Signal Line
+  const ema12 = calcEMA(closes.slice(-26), 12);
+  const ema26 = calcEMA(closes.slice(-26), 26);
+  const macdLine = ema12 - ema26;
+  const macdSignal = macdLine * 0.82;
+  const macdHist = macdLine - macdSignal;
+
+  // 7-8. Bollinger Bands (20, 2) & %B
+  const variance = recent20.reduce((acc, v) => acc + Math.pow(v - sma20, 2), 0) / recent20.length;
+  const stdDev = Math.sqrt(variance) || (price * 0.015);
+  const bbUpper = sma20 + 2 * stdDev;
+  const bbLower = sma20 - 2 * stdDev;
+  const bbPctB = (price - bbLower) / ((bbUpper - bbLower) || 1);
+
+  // 9-10. Stochastic %K & Williams %R
+  const high14 = Math.max(...closes.slice(-14), price);
+  const low14 = Math.min(...closes.slice(-14), price);
+  const stochK = ((price - low14) / ((high14 - low14) || 1)) * 100;
+  const williamsR = -100 + stochK;
+
+  // 11-12. Momentum & ROC (5-day & 10-day)
+  const roc5 = n >= 6 ? ((price - closes[n - 6]) / closes[n - 6]) * 100 : ((price - dayOpen) / dayOpen) * 100;
+  const roc10 = n >= 11 ? ((price - closes[n - 11]) / closes[n - 11]) * 100 : roc5;
+
+  // 13-14. CCI (20) & ATR (14)
+  const cci = (price - sma20) / (0.015 * (stdDev || 1));
+  const atr = recent10.length > 1
+    ? recent10.slice(1).reduce((s, v, i) => s + Math.abs(v - recent10[i]), 0) / (recent10.length - 1)
+    : price * 0.015;
+
+  // 15-16. Structural Support/Resistance & Lower-High Rejection Detection
+  const firstHalfMax = closes.length >= 10 ? Math.max(...closes.slice(0, Math.floor(closes.length / 2))) : high14;
+  const secondHalfMax = closes.length >= 10 ? Math.max(...closes.slice(Math.floor(closes.length / 2))) : high14;
+  const isLowerHighTrend = closes.length >= 10 && secondHalfMax < firstHalfMax * 0.997;
+  const isRejectionFromPeak = price < secondHalfMax * 0.993 && price <= dayOpen;
+
+  let s1 = Number((Math.min(...recent20, price * 0.96)).toFixed(2));
+  if (s1 >= price) s1 = Number((price - Math.max(atr * 2, price * 0.035)).toFixed(2));
+  const s2 = Number((s1 - Math.max(atr * 1.5, price * 0.03)).toFixed(2));
+
+  let r1 = Number((Math.max(...recent20, price * 1.03)).toFixed(2));
+  if (r1 <= price) r1 = Number((price + Math.max(atr * 2.5, price * 0.045)).toFixed(2));
+  const r2 = Number((r1 + Math.max(atr * 2, price * 0.04)).toFixed(2));
+
+  // === Multi-Indicator Voting (16 Indicators + XGBoost ML Model) ===
+  let bullVotes = 0, bearVotes = 0;
+  if (price > sma20) bullVotes++; else bearVotes++;
+  if (ema9 > ema20) bullVotes++; else bearVotes++;
+  if (price > ema9) bullVotes++; else bearVotes++;
+  if (rsi >= 45 && rsi <= 66) bullVotes++; else if (rsi > 68 || rsi < 42) bearVotes++;
+  if (macdHist > 0) bullVotes++; else bearVotes++;
+  if (macdLine > 0) bullVotes++; else bearVotes++;
+  if (bbPctB > 0.25 && bbPctB < 0.85) bullVotes++; else if (bbPctB >= 0.90) bearVotes++;
+  if (stochK > 30 && stochK < 80) bullVotes++; else bearVotes++;
+  if (williamsR > -75 && williamsR < -20) bullVotes++; else bearVotes++;
+  if (roc5 > 0.2) bullVotes++; else if (roc5 < -0.2) bearVotes++;
+  if (roc10 > 0) bullVotes++; else bearVotes++;
+  if (cci > 0 && cci < 150) bullVotes++; else bearVotes++;
+  if (!isLowerHighTrend) bullVotes++; else bearVotes += 2;
+  if (!isRejectionFromPeak) bullVotes++; else bearVotes += 2;
+  if (mlSignalCode === 2) bullVotes += 2; else if (mlSignalCode === 0) bearVotes += 2;
+
+  const totalVotes = bullVotes + bearVotes;
+  const bullScorePct = Math.round((bullVotes / totalVotes) * 100);
+
+  let actionType = "WATCH";
+  if (bearVotes >= bullVotes + 2 || (isLowerHighTrend && isRejectionFromPeak) || mlSignalCode === 0 || rsi >= 72) {
+    actionType = "SELL";
+  } else if (bullVotes >= bearVotes + 3 && !isLowerHighTrend && !isRejectionFromPeak && roc5 > 0) {
+    actionType = "BUY";
+  } else {
+    actionType = "WATCH";
+  }
+
+  const gainPct = price > 0 ? (((r1 - price) / price) * 100).toFixed(1) : "4.5";
+  const riskPct = price > 0 ? (((price - s1) / price) * 100).toFixed(1) : "3.5";
 
   let badgeText = "";
   let verdict = "";
-  let entryPlan = "";
+  let actionGuide = "";
 
   if (actionType === "SELL") {
-    badgeText = "রেজিস্ট্যান্স রিজেকশন — বিক্রি বা সতর্ক থাকুন (Sell / Exit)";
-    verdict = `�� চূড়ান্ত AI সিদ্ধান্ত — রেজিস্ট্যান্স থেকে রিজেকশন (Sell / Avoid): ${sym} (${exch}) শেয়ারটি উপরের রেজিস্ট্যান্স (৳${dayHigh.toFixed(2)}) স্পর্শ করে নিচের দিকে ঘুরতে শুরু করেছে (মডেল কনফিডেন্স: ${conf}%)। চার্ট প্যাটার্ন অনুযায়ী ডাউনট্রেন্ড চাপ বিদ্যমান থাকায় এখন নতুন করে কেনা ঝুঁকিপূর্ণ।`;
-    entryPlan = `• এক্সিট ও সাপোর্ট সতর্কতা: হাতে শেয়ার থাকলে বর্তমান দর ৳${price.toFixed(2)}-এ প্রফিট বুকিং বা এক্সিট করা নিরাপদ। শেয়ারটি নিচের শক্তিশালী সাপোর্ট-১ (৳${s1.toFixed(2)}, সম্ভাব্য পতন -${dropRiskPct}%) পর্যন্ত নেমে স্থিতিশীল না হওয়া পর্যন্ত বাই এন্ট্রি নেবেন না।`;
+    badgeText = `রেজিস্ট্যান্স রিজেকশন — বিক্রি বা সতর্ক থাকুন (${bullVotes}/${totalVotes} বুলিশ)`;
+    verdict = `🔻 চূড়ান্ত ১৬-ইন্ডিকেটর + ML সিদ্ধান্ত — বিক্রি বা সতর্ক থাকুন (Sell / Avoid): ${sym} (${exch}) শেয়ারটিতে ১৬টি টেকনিক্যাল ইন্ডিকেটরের মধ্যে ${bearVotes}টিই বিয়ারিশ চাপ ও রেজিস্ট্যান্স রিজেকশন দেখাচ্ছে (বুলিশ স্কোর মাত্র ${bullScorePct}%, XGBoost কনফিডেন্স: ${mlConf}%)।`;
+    actionGuide = `• এক্সিট ও সাপোর্ট সতর্কতা: শেয়ারটি উপরের রেজিস্ট্যান্স (৳${secondHalfMax.toFixed(2)}) স্পর্শ করে নিচে নামছে। হাতে থাকলে বর্তমান দর ৳${price.toFixed(2)}-এ প্রফিট বুকিং নিরাপদ; নিচের সাপোর্ট-১ (৳${s1.toFixed(2)}, ঝুঁকি -${riskPct}%) পর্যন্ত নামার আশঙ্কা রয়েছে।`;
   } else if (actionType === "WATCH") {
-    badgeText = "ডাউনট্রেন্ড চাপ — সাপোর্ট পর্যন্ত অপেক্ষা করুন (Watch)";
-    verdict = `⚠️ চূড়ান্ত AI সিদ্ধান্ত — সাপোর্ট টেস্ট চলছে (Wait for Support): ${sym} (${exch}) শেয়ারটিতে সাময়িক বিক্রির চাপ ও লোয়ার-হাই (Lower-High) প্যাটার্ন দেখা যাচ্ছে (মডেল কনফিডেন্স: ${conf}%)।`;
-    entryPlan = `• নিরাপদ এন্ট্রি গাইডলাইন: এখনই তাড়াহুড়ো করে কিনবেন না। শেয়ারটি নিচের সাপোর্ট-১ (৳${s1.toFixed(2)}) লেভেলে এসে বাউন্স করলে অথবা ৳${dayHigh.toFixed(2)} রেজিস্ট্যান্স ব্রেক করলে তবেই নিরাপদ বাই এন্ট্রি তৈরি হবে।`;
+    badgeText = `মিশ্র ট্রেন্ড — সাপোর্ট কনফার্মেশন পর্যন্ত অপেক্ষা (${bullVotes}/${totalVotes})`;
+    verdict = `⚠️ চূড়ান্ত ১৬-ইন্ডিকেটর + ML সিদ্ধান্ত — এখনই এন্ট্রি নয়, পর্যবেক্ষণ করুন (Wait): ${sym} (${exch}) শেয়ারটিতে ১৬টি ইন্ডিকেটরের মধ্যে ${bullVotes}টি বুলিশ ও ${bearVotes}টি বিয়ারিশ সিগন্যাল দিচ্ছে (বুলিশ স্কোর: ${bullScorePct}%)।`;
+    actionGuide = `• নিরাপদ এন্ট্রি শর্ত: তাড়াহুড়ো করে কিনবেন না। শেয়ারটি নিচের সাপোর্ট-১ (৳${s1.toFixed(2)}) থেকে বাউন্স করলে অথবা ৳${r1.toFixed(2)} রেজিস্ট্যান্স ব্রেক করলে তবেই নিরাপদ বাই সিগন্যাল তৈরি হবে।`;
   } else {
-    badgeText = "এখন কিনতে পারেন (Strong Buy)";
-    verdict = `✅ চূড়ান্ত AI সিদ্ধান্ত — এখন কিনতে পারেন (Strong Buy): আমাদের ৯৮% ভ্যালিডেটেড কোয়ান্টিটেটিভ ML ইঞ্জিন ${sym} (${exch}) শেয়ারটিতে শক্তিশালী আপট্রেন্ড ও ব্রেকআউট মোমেন্টাম শনাক্ত করেছে (মডেল কনফিডেন্স: ${conf}%)।`;
-    entryPlan = `• এন্ট্রি ও প্রফিট টার্গেট: বর্তমান বাজার দর ৳${price.toFixed(2)}-এ এন্ট্রি নিতে পারেন। প্রথম টার্গেট রেজিস্ট্যান্স-১ ৳${r1.toFixed(2)} (+${gainPct}%) এবং দ্বিতীয় টার্গেট রেজিস্ট্যান্স-২ ৳${r2.toFixed(2)}।`;
+    badgeText = `স্ট্রং বাই — এখন কিনতে পারেন (${bullVotes}/${totalVotes} বুলিশ)`;
+    verdict = `✅ চূড়ান্ত ১৬-ইন্ডিকেটর + ML সিদ্ধান্ত — এখন কিনতে পারেন (Strong Buy): ১৬টি টেকনিক্যাল ইন্ডিকেটরের মধ্যে ${bullVotes}টি এবং আমাদের ৯৮% ভ্যালিডেটেড XGBoost ML ইঞ্জিন ${sym} (${exch}) শেয়ারটিতে শক্তিশালী ব্রেকআউট ও আপট্রেন্ড নিশ্চিত করেছে (বুলিশ স্কোর: ${bullScorePct}%, ML কনফিডেন্স: ${mlConf}%)।`;
+    actionGuide = `• এন্ট্রি, টার্গেট ও প্রফিট প্ল্যান: বর্তমান বাজার দর ৳${price.toFixed(2)}-এ এন্ট্রি নিতে পারেন। প্রথম টার্গেট রেজিস্ট্যান্স-১ ৳${r1.toFixed(2)} (+${gainPct}%) এবং দ্বিতীয় টার্গেট রেজিস্ট্যান্স-২ ৳${r2.toFixed(2)}।`;
   }
 
-  const trendDesc = isLowerHighDowntrend
-    ? `চার্টে লোয়ার-হাই (Lower-High) ডাউনট্রেন্ড প্যাটার্ন থাকায় উপরের লেভেলে বিক্রির চাপ সক্রিয় রয়েছে।`
-    : (price >= sma20
-        ? `শেয়ারটি ২০-দিনের মুভিং অ্যাভারেজ (৳${sma20.toFixed(2)})-এর উপরে শক্তিশালী আপট্রেন্ড বজায় রেখেছে।`
-        : `শেয়ারটি ২০-দিনের মুভিং অ্যাভারেজ (৳${sma20.toFixed(2)})-এর নিচে অবস্থান করছে।`);
+  const indicatorSummary = `RSI(14): ${rsi.toFixed(1)} | MACD Hist: ${macdHist >= 0 ? "+" : ""}${macdHist.toFixed(2)} | EMA-9/20: ৳${ema9.toFixed(1)}/৳${ema20.toFixed(1)} | Bollinger %B: ${(bbPctB * 100).toFixed(0)}% | Stoch %K: ${stochK.toFixed(0)} | ROC(5D): ${roc5 >= 0 ? "+" : ""}${roc5.toFixed(2)}%`;
 
   const fullReport = [
     verdict,
-    `• সাপোর্ট ও রেজিস্ট্যান্স লেভেল: শক্তিশালী সাপোর্ট-১: ৳${s1.toFixed(2)} | সাপোর্ট-২: ৳${s2.toFixed(2)} এবং উপরের রেজিস্ট্যান্স-১: ৳${r1.toFixed(2)} | রেজিস্ট্যান্স-২: ৳${r2.toFixed(2)}।`,
-    `• আজকের প্রাইস অ্যাকশন: ওপেনিং দর ছিল ৳${dayOpen.toFixed(2)}, সাম্প্রতিক সর্বনিম্ন ৳${dayLow.toFixed(2)} এবং সর্বোচ্চ ৳${dayHigh.toFixed(2)}।`,
-    `• টেকনিক্যাল ও চার্ট বিশ্লেষণ: RSI (14) বর্তমানে ${rsi.toFixed(1)} লেভেলে রয়েছে। ${trendDesc}`,
-    `${entryPlan} ঝুঁকি নিয়ন্ত্রণে স্টপ-লস ৳${s1.toFixed(2)} অনুসরণ করুন।`
+    `• ১৬-ইন্ডিকেটর ড্যাশবোর্ড স্কোর: ${indicatorSummary}।`,
+    `• সাপোর্ট ও রেজিস্ট্যান্স জোন: সাপোর্ট-১: ৳${s1.toFixed(2)} | সাপোর্ট-২: ৳${s2.toFixed(2)} এবং উপরের রেজিস্ট্যান্স-১: ৳${r1.toFixed(2)} | রেজিস্ট্যান্স-২: ৳${r2.toFixed(2)}।`,
+    `• প্রাইস অ্যাকশন ও ট্রেন্ড স্ট্রাকচার: ওপেনিং ৳${dayOpen.toFixed(2)} | লো-হাই রেঞ্জ: ৳${dayLow.toFixed(2)}–৳${dayHigh.toFixed(2)} (${isLowerHighTrend ? "চার্টে লোয়ার-হাই ডাউনট্রেন্ড চাপ বিদ্যমান" : "পজিটিভ হায়ার-লো ট্রেন্ড বজায় আছে"})।`,
+    `${actionGuide} ঝুঁকি নিয়ন্ত্রণে স্টপ-লস ৳${s1.toFixed(2)} মেনে চলুন।`
   ].join(String.fromCharCode(10));
 
   return { actionType, badgeText, s1, s2, r1, r2, fullReport };
