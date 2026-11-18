@@ -167,39 +167,55 @@ function buildInstitutionalAnalysis(data) {
   const riskPct = price > 0 ? (((price - s1) / price) * 100).toFixed(1) : "3.5";
 
   let badgeText = "";
-  let headline = "";
-  let guidance = "";
+  let decisionTitle = "";
+  let decisionSummary = "";
+  let actionAdvice = "";
 
   if (actionType === "BUY") {
     badgeText = "এখন কিনতে পারেন (Strong Buy)";
-    headline = `✅ সম্মিলিত ML + ২০-ইন্ডিকেটর সিদ্ধান্ত — এখন কিনতে পারেন (Strong Buy): ${sym} (${exch}) শেয়ারটিতে ২০টি টেকনিক্যাল ও ML প্যারামিটারের মধ্যে ${bullCount}টিই বুলিশ সিগন্যাল দিচ্ছে (বুলিশ শক্তি: ${bullPct}%, XGBoost কনফিডেন্স: ${mlConf}%)। মাত্র ${bearCount}টি ইন্ডিকেটরে সামান্য বিশ্রাম দেখা গেলেও মূল ট্রেন্ড স্পষ্টভাবে ঊর্ধ্বমুখী।`;
-    guidance = `• এন্ট্রি ও প্রফিট প্ল্যান: বর্তমান বাজার দর ৳${price.toFixed(2)}-এ বাই এন্ট্রি নিতে পারেন। প্রথম টার্গেট রেজিস্ট্যান্স-১ ৳${r1.toFixed(2)} (+${gainPct}%) এবং দ্বিতীয় টার্গেট রেজিস্ট্যান্স-২ ৳${r2.toFixed(2)}।`;
+    decisionTitle = "✅ চূড়ান্ত AI সিদ্ধান্ত: এখন কিনতে পারেন";
+    decisionSummary = `আমাদের কোয়ান্টিটেটিভ বিশ্লেষণে <strong>${sym} (${exch})</strong> শেয়ারটির ২০টি সূচকের মধ্যে <strong>${bullCount}টিই ইতিবাচক</strong> সংকেত দিচ্ছে (মডেল কনফিডেন্স <strong>${mlConf}%</strong>)। বাজারের মূল ধারা এখন স্পষ্টভাবে ঊর্ধ্বমুখী।`;
+    actionAdvice = `বর্তমান বাজার দর <strong>৳${price.toFixed(2)}</strong>-এ ধাপে ধাপে শেয়ারটি কিনতে পারেন। প্রথম লক্ষ্যমাত্রা <strong>৳${r1.toFixed(2)}</strong> (সম্ভাব্য লাভ <strong>+${gainPct}%</strong>) এবং পরবর্তী লক্ষ্যমাত্রা <strong>৳${r2.toFixed(2)}</strong>।`;
   } else if (actionType === "SELL") {
-    badgeText = "বিক্রি বা সতর্ক থাকুন (Sell / Exit)";
-    headline = `🔻 সম্মিলিত ML + ২০-ইন্ডিকেটর সিদ্ধান্ত — বিক্রি বা সতর্ক থাকুন (Sell / Avoid): ${sym} (${exch}) শেয়ারটিতে ২০টি ইন্ডিকেটরের মধ্যে ${bearCount}টিই বিয়ারিশ চাপ ও রেজিস্ট্যান্স রিজেকশন দেখাচ্ছে (বুলিশ শক্তি মাত্র ${bullPct}%)।`;
-    guidance = `• এক্সিট ও সুরক্ষা গাইডলাইন: হাতে শেয়ার থাকলে বর্তমান দর ৳${price.toFixed(2)}-এ মুনাফা তুলে নেওয়া নিরাপদ। নিচের সাপোর্ট-১ (৳${s1.toFixed(2)}, সম্ভাব্য পতন -${riskPct}%) পর্যন্ত না নামা পর্যন্ত নতুন এন্ট্রি নেবেন না।`;
+    badgeText = "বিক্রি বা সতর্ক থাকুন (Sell)";
+    decisionTitle = "🔻 চূড়ান্ত AI সিদ্ধান্ত: বিক্রি বা সতর্ক থাকুন";
+    decisionSummary = `বিশ্লেষণে দেখা যাচ্ছে <strong>${sym} (${exch})</strong> শেয়ারটির ২০টি সূচকের মধ্যে <strong>${bearCount}টিই নেতিবাচক</strong> চাপ নির্দেশ করছে। উপরের রেজিস্ট্যান্স বাধায় শেয়ারটি নিচের দিকে নামার ঝুঁকিতে রয়েছে।`;
+    actionAdvice = `হাতে শেয়ার থাকলে বর্তমান দর <strong>৳${price.toFixed(2)}</strong>-এ মুনাফা তুলে নেওয়া নিরাপদ। শেয়ারটি নিচের সাপোর্ট <strong>৳${s1.toFixed(2)}</strong> (ঝুঁকি <strong>-${riskPct}%</strong>) পর্যন্ত স্থিতিশীল না হওয়া পর্যন্ত নতুন করে কিনবেন না।`;
   } else {
     badgeText = "হোল্ড / পর্যবেক্ষণ করুন (Hold)";
-    headline = `⚖️ সম্মিলিত ML + ২০-ইন্ডিকেটর সিদ্ধান্ত — হোল্ড ও পর্যবেক্ষণ করুন (Hold): ${sym} (${exch}) শেয়ারটিতে ২০টি প্যারামিটারের মধ্যে ${bullCount}টি বুলিশ এবং ${bearCount}টি বিয়ারিশ সিগন্যাল দিচ্ছে—অর্থাৎ বাজার এখন দিক নির্ধারণের মাঝামাঝি অবস্থানে রয়েছে।`;
-    guidance = `• নিরাপদ অপেক্ষা শর্ত: নতুন করে কেনার আগে শেয়ারটি নিচের সাপোর্ট-১ (৳${s1.toFixed(2)}) থেকে বাউন্স করে কি না অথবা ৳${r1.toFixed(2)} রেজিস্ট্যান্স ব্রেক করে কি না তা পর্যবেক্ষণ করুন।`;
+    decisionTitle = "⚖️ চূড়ান্ত AI সিদ্ধান্ত: এখনই তাড়াহুড়ো নয়, পর্যবেক্ষণ করুন";
+    decisionSummary = `<strong>${sym} (${exch})</strong> শেয়ারটির ২০টি সূচকের মধ্যে <strong>${bullCount}টি ইতিবাচক</strong> এবং <strong>${bearCount}টি সতর্কতামূলক</strong> অবস্থানে রয়েছে। বাজার এখন পরবর্তী দিক নির্ধারণের অপেক্ষায় আছে।`;
+    actionAdvice = `নতুন করে কেনার আগে শেয়ারটি নিচের সাপোর্ট <strong>৳${s1.toFixed(2)}</strong> থেকে ঘুরে দাঁড়ায় কি না অথবা উপরের <strong>৳${r1.toFixed(2)}</strong> সীমা অতিক্রম করে কি না তা দেখুন।`;
   }
 
-  const topBullStr = bullReasons.slice(0, 4).join(", ");
-  const topBearStr = bearReasons.length ? bearReasons.slice(0, 3).join(", ") : "কোনো বড় বিয়ারিশ বাধা নেই";
+  const momentumHuman = rsi14 < 40
+    ? `শেয়ারটি বর্তমানে অতিরিক্ত বিক্রিত অবস্থায় রয়েছে, যেখান থেকে দাম ঘুরে দাঁড়ানোর জোরালো সম্ভাবনা তৈরি হয়েছে।`
+    : (rsi14 > 68
+        ? `শেয়ারটির দাম দ্রুত বাড়ায় এখন কিছুটা বিশ্রাম বা মুনাফা তুলে নেওয়ার চাপ তৈরি হতে পারে।`
+        : `শেয়ারটির কেনাবেচার গতি ও চাহিদা বর্তমানে বেশ ভারসাম্যপূর্ণ এবং সুস্থ অবস্থায় রয়েছে।`);
 
-  const fullReport = [
-    headline,
-    `• ২০-ইন্ডিকেটর স্কোরবোর্ড (${bullCount}/২০ বুলিশ): প্রধান ইতিবাচক সংকেত—${topBullStr} | সতর্কতা সংকেত—${topBearStr}।`,
-    `• সাপোর্ট ও রেজিস্ট্যান্স লেভেল: সাপোর্ট-১: ৳${s1.toFixed(2)} | সাপোর্ট-২: ৳${s2.toFixed(2)} এবং উপরের রেজিস্ট্যান্স-১: ৳${r1.toFixed(2)} | রেজিস্ট্যান্স-২: ৳${r2.toFixed(2)}।`,
-    `• প্রাইস অ্যাকশন ও টেকনিক্যাল মান: বর্তমান দর ৳${price.toFixed(2)} (ওপেনিং: ৳${dayOpen.toFixed(2)}, লো–হাই: ৳${dayLow.toFixed(2)}–৳${dayHigh.toFixed(2)}) | RSI(14): ${rsi14.toFixed(1)} | MACD Hist: ${macdHist >= 0 ? "+" : ""}${macdHist.toFixed(2)} | EMA-9/20: ৳${ema9.toFixed(1)}/৳${ema20.toFixed(1)}।`,
-    `${guidance} ঝুঁকি নিয়ন্ত্রণে স্টপ-লস ৳${s1.toFixed(2)} মেনে চলুন।`
-  ].join(String.fromCharCode(10));
+  const trendHuman = price >= sma20
+    ? `গত ২০ কার্যদিবসের গড় দরের (<strong>৳${sma20.toFixed(2)}</strong>) উপরে অবস্থান করায় শেয়ারটির ঊর্ধ্বমুখী ধারা শক্তিশালী রয়েছে।`
+    : `গত ২০ কার্যদিবসের গড় দরের (<strong>৳${sma20.toFixed(2)}</strong>) নিচে অবস্থান করায় শেয়ারটিতে কিছুটা বিক্রির চাপ লক্ষ্য করা যাচ্ছে।`;
+
+  const fullReportHtml = `
+    <div style="font-family: 'Hind Siliguri', 'Noto Sans Bengali', system-ui, sans-serif; font-size: 15.5px; line-height: 1.85; color: #1E293B;">
+      <div style="font-size: 16.5px; font-weight: 700; color: #0F172A; margin-bottom: 6px;">${decisionTitle}</div>
+      <p style="margin: 0 0 12px 0; color: #334155;">${decisionSummary}</p>
+      <ul style="margin: 0; padding-left: 20px; list-style-type: disc; display: flex; flex-direction: column; gap: 8px;">
+        <li><strong>মার্কেট ট্রেন্ড ও গতিবিধি:</strong> ${trendHuman} ${momentumHuman}</li>
+        <li><strong>গুরুত্বপূর্ণ সাপোর্ট ও রেজিস্ট্যান্স:</strong> নিচের নিরাপদ সাপোর্ট স্তর <strong>৳${s1.toFixed(2)}</strong> (দ্বিতীয় সাপোর্ট <strong>৳${s2.toFixed(2)}</strong>) এবং উপরের বাধা বা রেজিস্ট্যান্স স্তর <strong>৳${r1.toFixed(2)}</strong> (দ্বিতীয় রেজিস্ট্যান্স <strong>৳${r2.toFixed(2)}</strong>)।</li>
+        <li><strong>সাম্প্রতিক লেনদেনের চিত্র:</strong> বর্তমান বাজার দর <strong>৳${price.toFixed(2)}</strong> (আগের ক্লোজিং/ওপেনিং ছিল <strong>৳${dayOpen.toFixed(2)}</strong> এবং সাম্প্রতিক সর্বনিম্ন থেকে সর্বোচ্চ সীমা <strong>৳${dayLow.toFixed(2)} – ৳${dayHigh.toFixed(2)}</strong>)।</li>
+        <li><strong>করণীয় ও ঝুঁকি ব্যবস্থাপনা:</strong> ${actionAdvice} বিনিয়োগ সুরক্ষায় অবশ্যই <strong>৳${s1.toFixed(2)}</strong> দরে স্টপ-লস মেনে চলুন।</li>
+      </ul>
+    </div>
+  `;
 
   const rawBackendAi = (data.ai_analysis_bn || "").trim();
   const isGenericFallback = !rawBackendAi || rawBackendAi.includes("মেশিন লার্নিং মডেলের বিশ্লেষণে অবস্থান") || rawBackendAi.includes("চূড়ান্ত AI সিদ্ধান্ত");
   const finalReport = isGenericFallback
-    ? fullReport
-    : fullReport + String.fromCharCode(10, 10) + "🤖 MukiSoft লাইভ AI বিশ্লেষক নোট: " + rawBackendAi;
+    ? fullReportHtml
+    : fullReportHtml + `<div style="margin-top: 12px; padding-top: 10px; border-top: 1px dashed #CBD5E1; font-size: 15px; line-height: 1.8; color: #334155;"><strong>🤖 বিশেষ বাজার পর্যবেক্ষণ:</strong> ${rawBackendAi}</div>`;
 
   return { actionType, badgeText, s1, s2, r1, r2, fullReport: finalReport };
 }
@@ -229,7 +245,7 @@ function startDynamicHeroSlideshow(picks) {
     if (stopEl) stopEl.innerText = `৳ ${item.stop_loss}`;
     if (aiEl) {
       aiEl.style.whiteSpace = "pre-line";
-      const slideInfo = buildInstitutionalAnalysis(item); aiEl.innerText = slideInfo.fullReport;
+      const slideInfo = buildInstitutionalAnalysis(item); aiEl.innerHTML = slideInfo.fullReport;
     }
     idx++;
   };
@@ -782,7 +798,7 @@ function renderDashboard(data) {
   if (aiTextBox) {
     aiTextBox.style.whiteSpace = "pre-line";
     aiTextBox.style.lineHeight = "1.75";
-    aiTextBox.innerText = enriched.fullReport;
+    aiTextBox.style.whiteSpace = "normal"; aiTextBox.innerHTML = enriched.fullReport;
   }
 
   const badge = document.getElementById("res-signal-badge");
