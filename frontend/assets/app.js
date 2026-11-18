@@ -1,16 +1,35 @@
 
+function getBstCycleStamp() {
+  const nowUtc = new Date();
+  const bst = new Date(nowUtc.getTime() + 6 * 3600 * 1000);
+  const hour = bst.getUTCHours();
+  // Before 3:00 PM (15:00) BST, lock to yesterday's 3:00 PM trained cycle; after 3:00 PM, switch to today's 3:00 PM cycle
+  if (hour < 15) {
+    bst.setUTCDate(bst.getUTCDate() - 1);
+  }
+  return bst.toISOString().slice(0, 10) + "_1500BST";
+}
+
 function sortThreeLowThreeHigh(list) {
   if (!Array.isArray(list) || list.length === 0) return list;
-  const normalized = list.map(item => ({
+  // Keep only genuinely bullish/buy-worthy candidates so weak stocks rotate out automatically
+  const qualified = list.filter(item => {
+    const rsi = Number(item.rsi || 52);
+    const chg = Number(item.change_pct || 0);
+    return (item.signal_code === 2 || chg >= 0) && rsi >= 36 && rsi <= 69;
+  });
+  const pool = qualified.length >= 4 ? qualified : list;
+  const enrichedPool = pool.map(item => ({
     ...item,
     signal: "এখন কিনতে পারেন (Strong Buy)",
     signal_code: 2
   }));
-  const sortedAsc = [...normalized].sort((x, y) => Number(x.price || 0) - Number(y.price || 0));
-  if (sortedAsc.length <= 3) return sortedAsc;
-  const firstThreeLow = sortedAsc.slice(0, 3);
-  const nextThreeHigh = sortedAsc.slice(3).slice(0, 3);
-  return [...firstThreeLow, ...nextThreeHigh];
+  const lowThree = enrichedPool.filter(x => Number(x.price || 0) < 100)
+    .sort((x, y) => Number(x.price || 0) - Number(y.price || 0)).slice(0, 3);
+  const highThree = enrichedPool.filter(x => Number(x.price || 0) >= 100)
+    .sort((x, y) => Number(x.price || 0) - Number(y.price || 0)).slice(0, 3);
+  const combined = [...lowThree, ...highThree];
+  return combined.length >= 4 ? combined : enrichedPool.sort((x, y) => Number(x.price || 0) - Number(y.price || 0)).slice(0, 6);
 }
 
 
@@ -392,7 +411,7 @@ async function loadDynamicLandingData() {
     sigEl.innerText = "লোড হচ্ছে...";
 
     // 1. Fetch strictly Buy-rated stocks from live market radar
-    const picksData = await cachedFetchJson(`${API_BASE_URL}/api/top-picks`, "ms_top_picks"); const picksRes = { ok: true, json: async () => picksData };
+    const picksData = await cachedFetchJson(`${API_BASE_URL}/api/top-picks`, `ms_top_picks_${getBstCycleStamp()}`); const picksRes = { ok: true, json: async () => picksData };
     let buyList = [];
 
     if (picksRes.ok) {

@@ -58,9 +58,11 @@ HEADERS = {
 }
 
 WATCHLIST_SYMBOLS = [
-    "SQURPHARMA", "BRACBANK", "GP", "BATBC", "WALTONHIL",
-    "RENATA", "ROBI", "CITYBANK", "EBL", "ACI",
-    "BXPHARMA", "UPGDCL", "MARICO", "OLYMPIC", "SINGERBD"
+    "EBL", "CITYBANK", "PRIMEBANK", "BRACBANK", "PUBALIBANK", "DUTCHBANGL",
+    "SINGERBD", "OLYMPIC", "BATBC", "MARICO", "GP", "ROBI",
+    "SQURPHARMA", "BXPHARMA", "RENATA", "ACI", "ORIONPHARM", "BEACONPHAR",
+    "WALTONHIL", "UPGDCL", "SUMITPOWER", "MJBL", "JAMUNAOIL", "MPETROLEUM",
+    "LHBL", "BSRMSTEEL", "IDLC", "LANKABAFIN", "UNIQUEHRL", "GENEXIL"
 ]
 
 
@@ -444,9 +446,21 @@ def get_dynamic_top_picks():
             except Exception:
                 continue
 
-    # Sort by highest ML buy score & confidence
-    scored_list.sort(key=lambda x: (x["signal_code"] == 2, x["buy_score"]), reverse=True)
-    top_6 = scored_list[:6]
+    # Filter strictly for positive momentum & true ML Buy candidates (weak stocks drop out automatically next day)
+    strong_candidates = [
+        x for x in scored_list
+        if (x["signal_code"] == 2 or x["change_pct"] > 0) and 38 <= x["rsi"] <= 68
+    ]
+    if len(strong_candidates) < 6:
+        strong_candidates = sorted(scored_list, key=lambda x: x["buy_score"], reverse=True)
+
+    low_tier = sorted([x for x in strong_candidates if x["price"] < 100], key=lambda x: x["buy_score"], reverse=True)[:3]
+    high_tier = sorted([x for x in strong_candidates if x["price"] >= 100], key=lambda x: x["buy_score"], reverse=True)[:3]
+
+    # Sort each tier cleanly by price ascending so user sees affordable shares first, then premium shares
+    low_tier.sort(key=lambda x: x["price"])
+    high_tier.sort(key=lambda x: x["price"])
+    top_6 = (low_tier + high_tier)[:6]
 
     return {
         "session": session,
