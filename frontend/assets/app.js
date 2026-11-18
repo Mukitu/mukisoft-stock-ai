@@ -653,12 +653,11 @@ function renderDashboard(data) {
       badgeEl.className = "inline-block px-3.5 py-1.5 rounded-lg text-sm font-bold bg-amber-50 text-amber-800 border border-amber-200";
     }
   }
-  }
-  const rAi = document.getElementById("res-ai-text");
-  if (rAi) {
-    rAi.style.whiteSpace = "pre-line";
-    rAi.style.lineHeight = "1.75";
-    rAi.innerText = enriched.fullReport;
+  const aiTextBox = document.getElementById("res-ai-text");
+  if (aiTextBox) {
+    aiTextBox.style.whiteSpace = "pre-line";
+    aiTextBox.style.lineHeight = "1.75";
+    aiTextBox.innerText = enriched.fullReport;
   }
 
   const badge = document.getElementById("res-signal-badge");
@@ -699,3 +698,4 @@ function renderDashboard(data) {
       }
     });
   }
+}
