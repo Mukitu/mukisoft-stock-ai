@@ -1,3 +1,4 @@
+if (!localStorage.getItem("ms_cache_v4")) { localStorage.clear(); localStorage.setItem("ms_cache_v4", "1"); }
 
 // Dynamic Hero Slideshow from 3:00 PM Daily Trained Exclusive Picks
 function startDynamicHeroSlideshow(picks) {
@@ -14,7 +15,7 @@ function startDynamicHeroSlideshow(picks) {
 
     if (symEl) symEl.innerText = `${item.symbol} (DSE)`;
     if (badgeEl) {
-      badgeEl.innerText = item.signal || "এখন কিনতে পারেন";
+      badgeEl.innerText = "এখন কিনতে পারেন (Strong Buy)";
       badgeEl.className = "px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200";
     }
     if (priceEl) priceEl.innerText = `৳ ${Number(item.price).toFixed(2)}`;
