@@ -1,3 +1,6 @@
+import time
+FAST_CACHE = {}
+CACHE_TTL = 180
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel

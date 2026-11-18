@@ -1,3 +1,23 @@
+async function cachedFetchJson(url, cacheKey, ttlMs = 120000) {
+  try {
+    const raw = localStorage.getItem(cacheKey);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Date.now() - parsed.ts < ttlMs) {
+        fetch(url).then(r => r.ok ? r.json() : null).then(fresh => {
+          if (fresh) localStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), data: fresh }));
+        }).catch(() => {});
+        return parsed.data;
+      }
+    }
+  } catch (_) {}
+  const res = await fetch(url);
+  if (!res.ok) throw new Error("Network error");
+  const data = await res.json();
+  try { localStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), data })); } catch (_) {}
+  return data;
+}
+
 // ============================================================
 // MukiSoft AI - Institutional Light Theme UI & Smart BD Session
 // ============================================================
@@ -151,7 +171,7 @@ async function loadDynamicLandingData() {
     sigEl.innerText = "লোড হচ্ছে...";
 
     // 1. Fetch strictly Buy-rated stocks from live market radar
-    const picksRes = await fetch(`${API_BASE_URL}/api/top-picks`);
+    const picksData = await cachedFetchJson(`${API_BASE_URL}/api/top-picks`, "ms_top_picks"); const picksRes = { ok: true, json: async () => picksData };
     let buyList = [];
 
     if (picksRes.ok) {
@@ -171,7 +191,7 @@ async function loadDynamicLandingData() {
       const item = buyList[currentIndex];
       const sym = item.symbol;
       try {
-        const sampleRes = await fetch(`${API_BASE_URL}/api/analyze?symbol=${encodeURIComponent(sym)}&exchange=DSE`);
+        const sDataCached = await cachedFetchJson(`${API_BASE_URL}/api/analyze?symbol=${encodeURIComponent(sym)}&exchange=DSE`, `ms_an_${sym}`); const sampleRes = { ok: true, json: async () => sDataCached };
         if (sampleRes.ok) {
           const sData = await sampleRes.json();
           const price = Number(sData.current_price);
@@ -183,7 +203,7 @@ async function loadDynamicLandingData() {
           document.getElementById("sample-target").innerText = `৳ ${target}`;
           document.getElementById("sample-stoploss").innerText = `৳ ${sl}`;
           sigEl.innerText = `${item.signal || "Strong Buy"} • ${sData.confidence}%`;
-          document.getElementById("sample-ai-text").innerText = sData.ai_analysis_bn.replace("মেশিন লার্নিং মডেলের", "কোয়ান্টিটেটিভ এআই ইঞ্জিনের");
+          const sAi = document.getElementById("sample-ai-text"); sAi.style.whiteSpace = "pre-line"; sAi.innerText = sData.ai_analysis_bn;
         }
       } catch (_) {}
 
@@ -499,7 +519,7 @@ function renderDashboard(data) {
   document.getElementById("res-confidence").innerText = `${data.confidence}%`;
   document.getElementById("res-target").innerText = `৳ ${data.target_price}`;
   document.getElementById("res-stoploss").innerText = `৳ ${data.stop_loss}`;
-  document.getElementById("res-ai-text").innerText = data.ai_analysis_bn;
+  const rAi = document.getElementById("res-ai-text"); rAi.style.whiteSpace = "pre-line"; rAi.innerText = data.ai_analysis_bn;
 
   const badge = document.getElementById("res-signal-badge");
   badge.innerText = data.signal;
