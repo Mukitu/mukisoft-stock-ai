@@ -164,6 +164,33 @@ def generate_humanized_advice(symbol, exchange, price, rsi, signal, confidence, 
         return fallback
 
 
+def verify_30d_not_sideways(symbol: str, current_price: float) -> bool:
+    """Verify via 30-day historical closes that the stock is genuinely trending and NOT stuck in a sideways box."""
+    try:
+        os.environ["BDSHARE_SOURCE"] = "new"
+        end_date = dt.date.today()
+        start_date = end_date - dt.timedelta(days=45)
+        df = get_basic_historical_data(str(start_date), str(end_date), symbol)
+        if df is not None and len(df) >= 12:
+            df = df.reset_index()
+            df.columns = [c.lower() for c in df.columns]
+            closes = pd.to_numeric(df['close'], errors='coerce').dropna()
+            closes = closes[closes > 0].tail(20).tolist()
+            if len(closes) >= 10:
+                hi = max(closes)
+                lo = min(closes)
+                range_pct = ((hi - lo) / (lo + 1e-9)) * 100.0
+                sma10 = sum(closes[-10:]) / 10.0
+                sma20 = sum(closes) / len(closes)
+                # Reject flat sideways channels (< 4.5% 20-day swing) or downtrending stocks below SMA20
+                if range_pct < 4.5 or current_price < sma20 * 1.005 or sma10 < sma20 * 0.998:
+                    return False
+                return True
+    except Exception:
+        pass
+    return True
+
+
 def score_stock_quick(symbol, c, o, h, l, ycp):
     """Fast ML + Anti-Sideways Market Research scoring for landing page dynamic list"""
     ycp = ycp if ycp > 0 else o
@@ -177,7 +204,8 @@ def score_stock_quick(symbol, c, o, h, l, ycp):
     # Measure intraday & swing volatility to detect dead/sideways stocks
     intraday_range_pct = ((max(h, c, o) - min(l, c, o)) / (ycp + 1e-9)) * 100.0
     bb_width_pct = ((bb_high - bb_low) / (sma + 1e-9)) * 100.0
-    is_sideways = (abs(ret_1d * 100.0) < 0.45 and intraday_range_pct < 1.15) or (bb_width_pct < 2.2)
+    is_penny_tick_trap = c < 12.0
+    is_sideways = is_penny_tick_trap or (abs(ret_1d * 100.0) < 0.55 and intraday_range_pct < 1.35) or (bb_width_pct < 2.5)
 
     row = pd.DataFrame([{
         'sma_20': sma,
@@ -488,15 +516,26 @@ def get_dynamic_top_picks():
         fallback_active.sort(key=lambda x: x["buy_score"], reverse=True)
         active_buys.extend(fallback_active)
 
-    # Top 3: Lowest-priced active trending Strong Buy companies (< 100 BDT)
-    low_candidates = [x for x in active_buys if x["price"] < 100]
+    # Top 3: Lowest-priced active trending Strong Buy companies (12 BDT <= price < 100 BDT) verified against 30D sideways traps
+    low_candidates = [x for x in active_buys if 12.0 <= x["price"] < 100]
     low_candidates.sort(key=lambda x: x["price"])
-    low_tier = low_candidates[:3]
+    low_tier = []
+    for cand in low_candidates:
+        if verify_30d_not_sideways(cand["symbol"], cand["price"]):
+            low_tier.append(cand)
+        if len(low_tier) == 3:
+            break
 
-    # Bottom 3: Mid-cap & Blue-chip active trending Strong Buy companies (>= 100 BDT)
+    # Bottom 3: Mid-cap & Blue-chip active trending Strong Buy companies (>= 100 BDT) verified against 30D sideways traps
     high_candidates = [x for x in active_buys if x["price"] >= 100]
     high_candidates.sort(key=lambda x: x["buy_score"], reverse=True)
-    high_tier = sorted(high_candidates[:3], key=lambda x: x["price"])
+    high_tier = []
+    for cand in high_candidates:
+        if verify_30d_not_sideways(cand["symbol"], cand["price"]):
+            high_tier.append(cand)
+        if len(high_tier) == 3:
+            break
+    high_tier.sort(key=lambda x: x["price"])
 
     top_6 = (low_tier + high_tier)[:6]
     if len(top_6) < 6:

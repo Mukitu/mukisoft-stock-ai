@@ -17,7 +17,8 @@ function sortThreeLowThreeHigh(list) {
     const rsi = Number(item.rsi || 52);
     const chg = Number(item.change_pct || 0);
     const volPct = Number(item.volatility_pct ?? Math.abs(chg) * 1.6);
-    const sideways = Boolean(item.is_sideways) || (Math.abs(chg) < 0.35 && volPct < 1.1);
+    const priceNum = Number(item.price || 0);
+    const sideways = priceNum < 12 || Boolean(item.is_sideways) || (Math.abs(chg) < 0.5 && volPct < 1.3);
     return !sideways && item.signal_code !== 0 && chg > 0 && rsi >= 40 && rsi <= 68;
   });
 
@@ -34,7 +35,7 @@ function sortThreeLowThreeHigh(list) {
   }));
 
   // Top 3: Lowest-priced active trending companies (< 100 BDT)
-  const lowThree = safePool.filter(x => Number(x.price || 0) < 100)
+  const lowThree = safePool.filter(x => Number(x.price || 0) >= 12 && Number(x.price || 0) < 100)
     .sort((x, y) => Number(x.price || 0) - Number(y.price || 0))
     .slice(0, 3);
 
@@ -253,7 +254,7 @@ function buildInstitutionalAnalysis(data) {
   return { actionType, badgeText, s1, s2, r1, r2, fullReport: finalReport };
 }
 
-if (!localStorage.getItem("ms_cache_v6")) { localStorage.clear(); localStorage.setItem("ms_cache_v6", "1"); }
+if (!localStorage.getItem("ms_cache_v7")) { localStorage.clear(); localStorage.setItem("ms_cache_v7", "1"); }
 
 // Dynamic Hero Slideshow from 3:00 PM Daily Trained Exclusive Picks
 function startDynamicHeroSlideshow(picks) {
