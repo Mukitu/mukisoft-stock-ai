@@ -184,7 +184,7 @@ function buildInstitutionalAnalysis(data) {
   let actionType = "HOLD";
   if (isSidewaysMarket && !isHomeRadarPick) {
     actionType = "SIDEWAYS";
-  } else if ((bullCount >= 13 && mlSignalCode !== 0) || (isHomeRadarPick && mlSignalCode !== 0 && bearCount <= 10)) {
+  } else if ((bullCount >= 16 && mlSignalCode !== 0) || (isHomeRadarPick && mlSignalCode !== 0 && bearCount <= 10)) {
     actionType = "BUY";
   } else if (bearCount >= 12 || mlSignalCode === 0) {
     actionType = "SELL";
@@ -254,7 +254,7 @@ function buildInstitutionalAnalysis(data) {
   return { actionType, badgeText, s1, s2, r1, r2, fullReport: finalReport };
 }
 
-if (!localStorage.getItem("ms_cache_v7")) { localStorage.clear(); localStorage.setItem("ms_cache_v7", "1"); }
+if (!localStorage.getItem("ms_cache_v8")) { localStorage.clear(); localStorage.setItem("ms_cache_v8", "1"); }
 
 // Dynamic Hero Slideshow from 3:00 PM Daily Trained Exclusive Picks
 function startDynamicHeroSlideshow(picks) {
@@ -832,7 +832,7 @@ function renderDashboard(data) {
   if (aiTextBox) {
     aiTextBox.style.whiteSpace = "pre-line";
     aiTextBox.style.lineHeight = "1.75";
-    aiTextBox.style.whiteSpace = "normal"; aiTextBox.innerHTML = enriched.fullReport;
+    aiTextBox.style.whiteSpace = "normal"; aiTextBox.innerHTML = enriched.fullReport; setTimeout(() => enforceUnifiedBadgeSync(data), 0);
   }
 
   const badge = document.getElementById("res-signal-badge");
@@ -872,5 +872,28 @@ function renderDashboard(data) {
         }
       }
     });
+  }
+}
+
+
+// === Final Post-Render Signal Badge & AI Report Synchronizer (Prevents Hold/Sell Badge Override) ===
+function enforceUnifiedBadgeSync(data) {
+  if (!data || typeof buildInstitutionalAnalysis !== "function") return;
+  const enriched = buildInstitutionalAnalysis(data);
+  const badge = document.getElementById("res-signal-badge") || document.getElementById("res-signal");
+  if (badge) {
+    badge.innerText = enriched.badgeText;
+    if (enriched.actionType === "BUY") {
+      badge.className = "inline-block px-3.5 py-1.5 rounded-lg text-sm font-bold bg-emerald-50 text-emerald-700 border border-emerald-200";
+    } else if (enriched.actionType === "SELL") {
+      badge.className = "inline-block px-3.5 py-1.5 rounded-lg text-sm font-bold bg-rose-50 text-rose-700 border border-rose-200";
+    } else {
+      badge.className = "inline-block px-3.5 py-1.5 rounded-lg text-sm font-bold bg-amber-50 text-amber-800 border border-amber-200";
+    }
+  }
+  const aiBox = document.getElementById("res-ai-text");
+  if (aiBox) {
+    aiBox.style.whiteSpace = "normal";
+    aiBox.innerHTML = enriched.fullReport;
   }
 }

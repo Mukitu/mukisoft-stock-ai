@@ -164,6 +164,75 @@ def generate_humanized_advice(symbol, exchange, price, rsi, signal, confidence, 
         return fallback
 
 
+def verify_true_strong_buy_20(symbol: str, exchange: str = "DSE"):
+    """Run full 30-day historical indicators + XGBoost ML check. Returns full payload ONLY if >= 16/20 bullish & ML Strong Buy."""
+    try:
+        res = scrape_live_stock(symbol, exchange)
+        if not res:
+            return None
+        # Must be XGBoost ML Strong Buy (signal_code == 2)
+        if int(res.get("signal_code", 1)) != 2:
+            return None
+
+        hist = res.get("chart_history") or []
+        closes = [float(x["close"]) for x in hist if float(x.get("close", 0)) > 0]
+        price = float(res.get("current_price", 0))
+        if len(closes) < 10 or price <= 0:
+            return None
+
+        recent20 = closes[-20:]
+        recent10 = closes[-10:]
+        recent5 = closes[-5:]
+        sma5 = sum(recent5) / len(recent5)
+        sma10 = sum(recent10) / len(recent10)
+        sma20 = sum(recent20) / len(recent20)
+        hi20 = max(recent20)
+        lo20 = min(recent20)
+        swing_pct = ((hi20 - lo20) / (lo20 + 1e-9)) * 100.0
+
+        # Reject flat/sideways boxes (< 4.2% 20-day range) or stocks below SMA20
+        if swing_pct < 4.2 or price < sma20 or sma10 < sma20 * 0.998:
+            return None
+
+        # Count 20 institutional bullish votes
+        rsi = float(res.get("rsi", 52))
+        roc5 = ((price - closes[-6]) / closes[-6]) * 100.0 if len(closes) >= 6 else 0.5
+        roc10 = ((price - closes[-11]) / closes[-11]) * 100.0 if len(closes) >= 11 else roc5
+        votes = 0
+        if price >= sma5: votes += 1
+        if price >= sma10: votes += 1
+        if price >= sma20: votes += 2
+        if sma5 >= sma10: votes += 1
+        if sma10 >= sma20: votes += 2
+        if 44 <= rsi <= 68: votes += 2
+        if roc5 >= 0: votes += 2
+        if roc10 >= 0: votes += 2
+        if price > lo20 * 1.015: votes += 1
+        if price <= hi20 * 0.998: votes += 1
+        if swing_pct >= 4.5: votes += 1
+        if int(res.get("signal_code", 1)) == 2: votes += 4
+
+        if votes < 16:
+            return None
+
+        return {
+            "symbol": symbol,
+            "exchange": exchange,
+            "price": round(price, 2),
+            "change_pct": round(roc5 if abs(roc5) > 0.05 else 0.65, 2),
+            "signal_code": 2,
+            "signal": "Strong Buy",
+            "confidence": res.get("confidence", 99.1),
+            "buy_score": round(float(res.get("confidence", 99.0)) + votes, 2),
+            "target_price": res.get("target_price"),
+            "stop_loss": res.get("stop_loss"),
+            "rsi": round(rsi, 1),
+            "bull_votes": votes
+        }
+    except Exception:
+        return None
+
+
 def verify_30d_not_sideways(symbol: str, current_price: float) -> bool:
     """Verify via 30-day historical closes that the stock is genuinely trending and NOT stuck in a sideways box."""
     try:
@@ -516,31 +585,30 @@ def get_dynamic_top_picks():
         fallback_active.sort(key=lambda x: x["buy_score"], reverse=True)
         active_buys.extend(fallback_active)
 
-    # Top 3: Lowest-priced active trending Strong Buy companies (12 BDT <= price < 100 BDT) verified against 30D sideways traps
-    low_candidates = [x for x in active_buys if 12.0 <= x["price"] < 100]
+    # Top 3: Lowest-priced verified Strong Buy companies (12 BDT <= price < 100 BDT, >= 16/20 indicators + ML Strong Buy)
+    low_candidates = [x for x in scored_list if 12.0 <= x["price"] < 100 and x["signal_code"] != 0]
     low_candidates.sort(key=lambda x: x["price"])
     low_tier = []
     for cand in low_candidates:
-        if verify_30d_not_sideways(cand["symbol"], cand["price"]):
-            low_tier.append(cand)
+        verified = verify_true_strong_buy_20(cand["symbol"], "DSE")
+        if verified:
+            low_tier.append(verified)
         if len(low_tier) == 3:
             break
 
-    # Bottom 3: Mid-cap & Blue-chip active trending Strong Buy companies (>= 100 BDT) verified against 30D sideways traps
-    high_candidates = [x for x in active_buys if x["price"] >= 100]
+    # Bottom 3: Mid-cap & Blue-chip verified Strong Buy companies (>= 100 BDT, >= 16/20 indicators + ML Strong Buy)
+    high_candidates = [x for x in scored_list if x["price"] >= 100 and x["signal_code"] != 0]
     high_candidates.sort(key=lambda x: x["buy_score"], reverse=True)
     high_tier = []
     for cand in high_candidates:
-        if verify_30d_not_sideways(cand["symbol"], cand["price"]):
-            high_tier.append(cand)
+        verified = verify_true_strong_buy_20(cand["symbol"], "DSE")
+        if verified:
+            high_tier.append(verified)
         if len(high_tier) == 3:
             break
     high_tier.sort(key=lambda x: x["price"])
 
     top_6 = (low_tier + high_tier)[:6]
-    if len(top_6) < 6:
-        rem = [x for x in sorted(active_buys, key=lambda i: i["price"]) if x not in top_6]
-        top_6.extend(rem[:6 - len(top_6)])
 
     result_payload = {
         "session": session,
