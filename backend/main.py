@@ -1,6 +1,32 @@
 import time, asyncio, datetime
 FAST_CACHE = {}
 DAILY_PICKS_CACHE = {"date_key": "", "data": None}
+DAILY_CACHE_FILE = "daily_picks_cache.json"
+
+def load_persistent_picks(cycle_key: str):
+    if DAILY_PICKS_CACHE["date_key"] == cycle_key and DAILY_PICKS_CACHE["data"]:
+        return DAILY_PICKS_CACHE["data"]
+    try:
+        if os.path.exists(DAILY_CACHE_FILE):
+            with open(DAILY_CACHE_FILE, "r", encoding="utf-8") as cf:
+                saved = json.load(cf)
+            if saved.get("date_key") == cycle_key and saved.get("data"):
+                DAILY_PICKS_CACHE["date_key"] = cycle_key
+                DAILY_PICKS_CACHE["data"] = saved["data"]
+                return saved["data"]
+    except Exception:
+        pass
+    return None
+
+def save_persistent_picks(cycle_key: str, payload: dict):
+    DAILY_PICKS_CACHE["date_key"] = cycle_key
+    DAILY_PICKS_CACHE["data"] = payload
+    try:
+        with open(DAILY_CACHE_FILE, "w", encoding="utf-8") as cf:
+            json.dump({"date_key": cycle_key, "data": payload}, cf, ensure_ascii=False)
+    except Exception:
+        pass
+
 CACHE_TTL = 300
 
 def get_bst_now():
@@ -517,8 +543,9 @@ def get_dynamic_top_picks():
     """Landing page-er jonno live market data theke ajker/agamikaler best buy stocks (3:00 PM BST Daily Lock)"""
     session = get_bd_market_session()
     cycle_key = get_market_cycle_key()
-    if not session["is_live"] and DAILY_PICKS_CACHE["date_key"] == cycle_key and DAILY_PICKS_CACHE["data"]:
-        cached_resp = dict(DAILY_PICKS_CACHE["data"])
+    cached_data = load_persistent_picks(cycle_key)
+    if not session["is_live"] and cached_data:
+        cached_resp = dict(cached_data)
         cached_resp["session"] = session
         return cached_resp
     scored_list = []
@@ -589,7 +616,7 @@ def get_dynamic_top_picks():
     low_candidates = [x for x in scored_list if 12.0 <= x["price"] < 100 and x["signal_code"] != 0]
     low_candidates.sort(key=lambda x: x["price"])
     low_tier = []
-    for cand in low_candidates:
+    for cand in low_candidates[:5]:
         verified = verify_true_strong_buy_20(cand["symbol"], "DSE")
         if verified:
             low_tier.append(verified)
@@ -600,7 +627,7 @@ def get_dynamic_top_picks():
     high_candidates = [x for x in scored_list if x["price"] >= 100 and x["signal_code"] != 0]
     high_candidates.sort(key=lambda x: x["buy_score"], reverse=True)
     high_tier = []
-    for cand in high_candidates:
+    for cand in high_candidates[:5]:
         verified = verify_true_strong_buy_20(cand["symbol"], "DSE")
         if verified:
             high_tier.append(verified)
@@ -615,8 +642,7 @@ def get_dynamic_top_picks():
         "picks": top_6
     }
     if top_6:
-        DAILY_PICKS_CACHE["date_key"] = cycle_key
-        DAILY_PICKS_CACHE["data"] = result_payload
+        save_persistent_picks(cycle_key, result_payload)
     return result_payload
 
 
@@ -747,8 +773,12 @@ async def prewarm_daily_engine():
     async def runner():
         while True:
             try:
-                await get_top_picks()
+                now_bst = get_bst_now()
+                # Between 2:30 PM and 3:05 PM BST, force fresh post-market analysis for the 3:00 PM daily lock
+                if now_bst.hour == 14 and now_bst.minute >= 30:
+                    DAILY_PICKS_CACHE["date_key"] = ""
+                await asyncio.to_thread(get_dynamic_top_picks)
             except Exception:
                 pass
-            await asyncio.sleep(600)  # Check every 10 mins; auto-retrains at 3:00 PM BST
+            await asyncio.sleep(600)
     asyncio.create_task(runner())

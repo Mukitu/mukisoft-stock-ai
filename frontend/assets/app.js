@@ -254,7 +254,7 @@ function buildInstitutionalAnalysis(data) {
   return { actionType, badgeText, s1, s2, r1, r2, fullReport: finalReport };
 }
 
-if (!localStorage.getItem("ms_cache_v8")) { localStorage.clear(); localStorage.setItem("ms_cache_v8", "1"); }
+if (!localStorage.getItem("ms_cache_v9")) { localStorage.clear(); localStorage.setItem("ms_cache_v9", "1"); }
 
 // Dynamic Hero Slideshow from 3:00 PM Daily Trained Exclusive Picks
 function startDynamicHeroSlideshow(picks) {
