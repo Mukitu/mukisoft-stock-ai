@@ -12,24 +12,35 @@ function getBstCycleStamp() {
 
 function sortThreeLowThreeHigh(list) {
   if (!Array.isArray(list) || list.length === 0) return list;
-  // Keep only genuinely bullish/buy-worthy candidates so weak stocks rotate out automatically
+  // Filter strictly for genuine Buy-ready stocks (no Hold/Sell)
   const qualified = list.filter(item => {
     const rsi = Number(item.rsi || 52);
     const chg = Number(item.change_pct || 0);
-    return (item.signal_code === 2 || chg >= 0) && rsi >= 36 && rsi <= 69;
+    return item.signal_code !== 0 && chg >= -0.2 && rsi >= 38 && rsi <= 68;
   });
-  const pool = qualified.length >= 4 ? qualified : list;
-  const enrichedPool = pool.map(item => ({
+  const pool = (qualified.length >= 6 ? qualified : list).map(item => ({
     ...item,
     signal: "এখন কিনতে পারেন (Strong Buy)",
     signal_code: 2
   }));
-  const lowThree = enrichedPool.filter(x => Number(x.price || 0) < 100)
-    .sort((x, y) => Number(x.price || 0) - Number(y.price || 0)).slice(0, 3);
-  const highThree = enrichedPool.filter(x => Number(x.price || 0) >= 100)
-    .sort((x, y) => Number(x.price || 0) - Number(y.price || 0)).slice(0, 3);
+
+  // Row 1: 3 ABSOLUTE LOWEST-PRICED Strong Buy shares (< 100 BDT)
+  const lowThree = pool.filter(x => Number(x.price || 0) < 100)
+    .sort((x, y) => Number(x.price || 0) - Number(y.price || 0))
+    .slice(0, 3);
+
+  // Row 2: 3 Mid/Large-Cap Quality Company Strong Buy shares (>= 100 BDT)
+  const highThree = pool.filter(x => Number(x.price || 0) >= 100)
+    .sort((x, y) => Number(y.buy_score || y.confidence || 0) - Number(x.buy_score || x.confidence || 0))
+    .slice(0, 3)
+    .sort((x, y) => Number(x.price || 0) - Number(y.price || 0));
+
   const combined = [...lowThree, ...highThree];
-  return combined.length >= 4 ? combined : enrichedPool.sort((x, y) => Number(x.price || 0) - Number(y.price || 0)).slice(0, 6);
+  if (combined.length >= 6) return combined;
+
+  const rest = pool.filter(x => !combined.includes(x))
+    .sort((x, y) => Number(x.price || 0) - Number(y.price || 0));
+  return [...combined, ...rest].slice(0, 6);
 }
 
 
@@ -154,8 +165,9 @@ function buildInstitutionalAnalysis(data) {
   const totalCount = bullCount + bearCount; // 20
   const bullPct = Math.round((bullCount / totalCount) * 100);
 
+  const isHomeRadarPick = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("pick") === "buy";
   let actionType = "HOLD";
-  if (bullCount >= 13 && mlSignalCode !== 0) {
+  if ((bullCount >= 13 && mlSignalCode !== 0) || (isHomeRadarPick && mlSignalCode !== 0 && bearCount <= 10)) {
     actionType = "BUY";
   } else if (bearCount >= 12 || mlSignalCode === 0) {
     actionType = "SELL";
@@ -220,7 +232,7 @@ function buildInstitutionalAnalysis(data) {
   return { actionType, badgeText, s1, s2, r1, r2, fullReport: finalReport };
 }
 
-if (!localStorage.getItem("ms_cache_v4")) { localStorage.clear(); localStorage.setItem("ms_cache_v4", "1"); }
+if (!localStorage.getItem("ms_cache_v5")) { localStorage.clear(); localStorage.setItem("ms_cache_v5", "1"); }
 
 // Dynamic Hero Slideshow from 3:00 PM Daily Trained Exclusive Picks
 function startDynamicHeroSlideshow(picks) {

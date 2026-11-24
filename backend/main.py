@@ -58,11 +58,17 @@ HEADERS = {
 }
 
 WATCHLIST_SYMBOLS = [
-    "EBL", "CITYBANK", "PRIMEBANK", "BRACBANK", "PUBALIBANK", "DUTCHBANGL",
-    "SINGERBD", "OLYMPIC", "BATBC", "MARICO", "GP", "ROBI",
-    "SQURPHARMA", "BXPHARMA", "RENATA", "ACI", "ORIONPHARM", "BEACONPHAR",
-    "WALTONHIL", "UPGDCL", "SUMITPOWER", "MJBL", "JAMUNAOIL", "MPETROLEUM",
-    "LHBL", "BSRMSTEEL", "IDLC", "LANKABAFIN", "UNIQUEHRL", "GENEXIL"
+    # Lowest-priced active & fundamentally sound DSE stocks (< 100 BDT)
+    "EBL", "CITYBANK", "PRIMEBANK", "PUBALIBANK", "DUTCHBANGL", "MTB", "IFIC", "NCCBANK",
+    "SINGERBD", "RUNNERAUTO", "IFADAUTOS", "BBSCABLES", "GPHISPAT", "SSSTEEL", "NAHEEACP",
+    "AAMRANET", "AGNISYSL", "GENEXIL", "BDCOM", "ITCON", "DAFODILCOM",
+    "FUWANGFOOD", "FINEFOODS", "LOVELLO", "APEXFOODS", "INTRACO", "DOREENPWR", "SUMITPOWER",
+    "MALEKSPIN", "ENVOYTEX", "MATINSPINN", "ACFL", "ARGONDENIM", "LANKABAFIN", "IDLC",
+    # Mid & Large-Cap Blue-Chip Companies (>= 100 BDT)
+    "OLYMPIC", "BATBC", "MARICO", "GP", "ROBI", "BSCCL",
+    "SQURPHARMA", "BXPHARMA", "RENATA", "ACI", "IBNSINA", "ORIONINFU",
+    "WALTONHIL", "UPGDCL", "MJBL", "JAMUNAOIL", "MPETROLEUM", "PADMAOIL", "LINDEBD",
+    "LHBL", "BSRMSTEEL", "HEIDELBCEM", "UNILEVERCL", "RECKITTBEN"
 ]
 
 
@@ -451,21 +457,33 @@ def get_dynamic_top_picks():
             except Exception:
                 continue
 
-    # Filter strictly for positive momentum & true ML Buy candidates (weak stocks drop out automatically next day)
-    strong_candidates = [
+    # Strictly select true Strong Buy candidates (bullish ML + healthy RSI + positive momentum)
+    true_buys = [
         x for x in scored_list
-        if (x["signal_code"] == 2 or x["change_pct"] > 0) and 38 <= x["rsi"] <= 68
+        if x["signal_code"] == 2 and x["change_pct"] >= 0 and 42 <= x["rsi"] <= 66
     ]
-    if len(strong_candidates) < 6:
-        strong_candidates = sorted(scored_list, key=lambda x: x["buy_score"], reverse=True)
+    if len(true_buys) < 6:
+        extra = [
+            x for x in scored_list
+            if x not in true_buys and x["signal_code"] != 0 and x["change_pct"] >= 0 and 40 <= x["rsi"] <= 68
+        ]
+        extra.sort(key=lambda x: x["buy_score"], reverse=True)
+        true_buys.extend(extra)
 
-    low_tier = sorted([x for x in strong_candidates if x["price"] < 100], key=lambda x: x["buy_score"], reverse=True)[:3]
-    high_tier = sorted([x for x in strong_candidates if x["price"] >= 100], key=lambda x: x["buy_score"], reverse=True)[:3]
+    # Top row: 3 ABSOLUTE LOWEST-PRICED Strong Buy stocks (< 100 BDT)
+    low_candidates = [x for x in true_buys if x["price"] < 100]
+    low_candidates.sort(key=lambda x: x["price"])
+    low_tier = low_candidates[:3]
 
-    # Sort each tier cleanly by price ascending so user sees affordable shares first, then premium shares
-    low_tier.sort(key=lambda x: x["price"])
-    high_tier.sort(key=lambda x: x["price"])
+    # Bottom row: 3 Mid-Cap / Blue-Chip Strong Buy stocks (>= 100 BDT)
+    high_candidates = [x for x in true_buys if x["price"] >= 100]
+    high_candidates.sort(key=lambda x: x["buy_score"], reverse=True)
+    high_tier = sorted(high_candidates[:3], key=lambda x: x["price"])
+
     top_6 = (low_tier + high_tier)[:6]
+    if len(top_6) < 6:
+        rem = [x for x in sorted(true_buys, key=lambda i: i["price"]) if x not in top_6]
+        top_6.extend(rem[:6 - len(top_6)])
 
     result_payload = {
         "session": session,
