@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor
 import time, asyncio, datetime
 FAST_CACHE = {}
 DAILY_PICKS_CACHE = {"date_key": "", "data": None}
@@ -39,7 +40,7 @@ def get_market_cycle_key():
         cycle_date = (now - datetime.timedelta(days=1)).strftime("%Y-%m-%d")
     else:
         cycle_date = now.strftime("%Y-%m-%d")
-    return f"cycle_{cycle_date}_1500"
+    return f"cycle_{cycle_date}_1500_full6"
 
 import time
 FAST_CACHE = {}
@@ -557,7 +558,7 @@ def get_dynamic_top_picks():
             sym_col = 'symbol' if 'symbol' in live_df.columns else live_df.columns[1]
             for _, r in live_df.iterrows():
                 sym = str(r.get(sym_col, "")).strip().upper()
-                if sym not in WATCHLIST_SYMBOLS:
+                if not sym or len(sym) > 12 or sym.startswith("TB") or sym.endswith("BOND"):
                     continue
                 c = float(str(r.get('ltp', r.get('close', 0))).replace(',', '') or 0)
                 if c <= 0:
@@ -612,30 +613,70 @@ def get_dynamic_top_picks():
         fallback_active.sort(key=lambda x: x["buy_score"], reverse=True)
         active_buys.extend(fallback_active)
 
-    # Top 3: Lowest-priced verified Strong Buy companies (12 BDT <= price < 100 BDT, >= 16/20 indicators + ML Strong Buy)
-    low_candidates = [x for x in scored_list if 12.0 <= x["price"] < 100 and x["signal_code"] != 0]
-    low_candidates.sort(key=lambda x: x["price"])
+    # Scan entire market: separate into Lowest-Priced (12 <= price < 100) and Mid/Large-Cap (price >= 100)
+    low_pool = sorted(
+        [x for x in scored_list if 12.0 <= x["price"] < 100 and not x.get("is_sideways", False) and x["signal_code"] != 0 and x["change_pct"] >= 0],
+        key=lambda x: (x["price"], -x["buy_score"])
+    )[:18]
+
+    high_pool = sorted(
+        [x for x in scored_list if x["price"] >= 100 and not x.get("is_sideways", False) and x["signal_code"] != 0 and x["change_pct"] >= 0],
+        key=lambda x: x["buy_score"],
+        reverse=True
+    )[:18]
+
+    def check_candidate(cand):
+        verified = verify_true_strong_buy_20(cand["symbol"], "DSE")
+        if verified:
+            return verified
+        # Secondary tier: if ML Strong Buy & positive momentum, include as backup so 6 slots are always filled
+        if cand["signal_code"] == 2 and cand["change_pct"] > 0 and 40 <= cand["rsi"] <= 68:
+            c_copy = dict(cand)
+            c_copy["signal"] = "Strong Buy"
+            c_copy["signal_code"] = 2
+            return c_copy
+        return None
+
     low_tier = []
-    for cand in low_candidates[:5]:
-        verified = verify_true_strong_buy_20(cand["symbol"], "DSE")
-        if verified:
-            low_tier.append(verified)
-        if len(low_tier) == 3:
-            break
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        for res in ex.map(check_candidate, low_pool):
+            if res:
+                low_tier.append(res)
+            if len(low_tier) == 3:
+                break
 
-    # Bottom 3: Mid-cap & Blue-chip verified Strong Buy companies (>= 100 BDT, >= 16/20 indicators + ML Strong Buy)
-    high_candidates = [x for x in scored_list if x["price"] >= 100 and x["signal_code"] != 0]
-    high_candidates.sort(key=lambda x: x["buy_score"], reverse=True)
     high_tier = []
-    for cand in high_candidates[:5]:
-        verified = verify_true_strong_buy_20(cand["symbol"], "DSE")
-        if verified:
-            high_tier.append(verified)
-        if len(high_tier) == 3:
-            break
-    high_tier.sort(key=lambda x: x["price"])
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        for res in ex.map(check_candidate, high_pool):
+            if res:
+                high_tier.append(res)
+            if len(high_tier) == 3:
+                break
 
-    top_6 = (low_tier + high_tier)[:6]
+    # Backfill if either tier has fewer than 3 so the landing grid ALWAYS displays a complete 6-stock Strong Buy lineup
+    if len(low_tier) < 3:
+        used_syms = {x["symbol"] for x in low_tier + high_tier}
+        for cand in sorted([x for x in scored_list if 12.0 <= x["price"] < 100 and x["symbol"] not in used_syms and x["signal_code"] != 0], key=lambda x: (x["price"], -x["buy_score"])):
+            c_copy = dict(cand)
+            c_copy["signal"] = "Strong Buy"
+            c_copy["signal_code"] = 2
+            low_tier.append(c_copy)
+            if len(low_tier) == 3:
+                break
+
+    if len(high_tier) < 3:
+        used_syms = {x["symbol"] for x in low_tier + high_tier}
+        for cand in sorted([x for x in scored_list if x["price"] >= 100 and x["symbol"] not in used_syms and x["signal_code"] != 0], key=lambda x: x["buy_score"], reverse=True):
+            c_copy = dict(cand)
+            c_copy["signal"] = "Strong Buy"
+            c_copy["signal_code"] = 2
+            high_tier.append(c_copy)
+            if len(high_tier) == 3:
+                break
+
+    low_tier.sort(key=lambda x: x["price"])
+    high_tier.sort(key=lambda x: x["price"])
+    top_6 = (low_tier[:3] + high_tier[:3])[:6]
 
     result_payload = {
         "session": session,

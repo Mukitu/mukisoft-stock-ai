@@ -7,7 +7,7 @@ function getBstCycleStamp() {
   if (hour < 15) {
     bst.setUTCDate(bst.getUTCDate() - 1);
   }
-  return bst.toISOString().slice(0, 10) + "_1500BST";
+  return bst.toISOString().slice(0, 10) + "_1500BST_v2";
 }
 
 function sortThreeLowThreeHigh(list) {
@@ -254,7 +254,7 @@ function buildInstitutionalAnalysis(data) {
   return { actionType, badgeText, s1, s2, r1, r2, fullReport: finalReport };
 }
 
-if (!localStorage.getItem("ms_cache_v9")) { localStorage.clear(); localStorage.setItem("ms_cache_v9", "1"); }
+if (!localStorage.getItem("ms_cache_v10")) { localStorage.clear(); localStorage.setItem("ms_cache_v10", "1"); }
 
 // Dynamic Hero Slideshow from 3:00 PM Daily Trained Exclusive Picks
 function startDynamicHeroSlideshow(picks) {
