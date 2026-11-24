@@ -400,8 +400,13 @@ def get_live_ticker():
 
 @app.get("/api/top-picks")
 def get_dynamic_top_picks():
-    """Landing page-er jonno live market data theke ajker/agamikaler best buy stocks"""
+    """Landing page-er jonno live market data theke ajker/agamikaler best buy stocks (3:00 PM BST Daily Lock)"""
     session = get_bd_market_session()
+    cycle_key = get_market_cycle_key()
+    if not session["is_live"] and DAILY_PICKS_CACHE["date_key"] == cycle_key and DAILY_PICKS_CACHE["data"]:
+        cached_resp = dict(DAILY_PICKS_CACHE["data"])
+        cached_resp["session"] = session
+        return cached_resp
     scored_list = []
 
     try:
@@ -462,10 +467,14 @@ def get_dynamic_top_picks():
     high_tier.sort(key=lambda x: x["price"])
     top_6 = (low_tier + high_tier)[:6]
 
-    return {
+    result_payload = {
         "session": session,
         "picks": top_6
     }
+    if top_6:
+        DAILY_PICKS_CACHE["date_key"] = cycle_key
+        DAILY_PICKS_CACHE["data"] = result_payload
+    return result_payload
 
 
 @app.get("/api/analyze")
