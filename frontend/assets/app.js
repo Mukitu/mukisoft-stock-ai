@@ -12,25 +12,34 @@ function getBstCycleStamp() {
 
 function sortThreeLowThreeHigh(list) {
   if (!Array.isArray(list) || list.length === 0) return list;
-  // Filter strictly for genuine Buy-ready stocks (no Hold/Sell)
-  const qualified = list.filter(item => {
+  // Filter out Sideways/Flat stocks (low volatility or near-zero momentum) and keep active trending Buy stocks
+  const activeTrending = list.filter(item => {
     const rsi = Number(item.rsi || 52);
     const chg = Number(item.change_pct || 0);
-    return item.signal_code !== 0 && chg >= -0.2 && rsi >= 38 && rsi <= 68;
+    const volPct = Number(item.volatility_pct ?? Math.abs(chg) * 1.6);
+    const sideways = Boolean(item.is_sideways) || (Math.abs(chg) < 0.35 && volPct < 1.1);
+    return !sideways && item.signal_code !== 0 && chg > 0 && rsi >= 40 && rsi <= 68;
   });
-  const pool = (qualified.length >= 6 ? qualified : list).map(item => ({
+
+  const pool = (activeTrending.length >= 6 ? activeTrending : list.filter(x => !x.is_sideways && Number(x.change_pct || 0) >= 0)).map(item => ({
     ...item,
     signal: "এখন কিনতে পারেন (Strong Buy)",
     signal_code: 2
   }));
 
-  // Row 1: 3 ABSOLUTE LOWEST-PRICED Strong Buy shares (< 100 BDT)
-  const lowThree = pool.filter(x => Number(x.price || 0) < 100)
+  const safePool = pool.length >= 4 ? pool : list.map(item => ({
+    ...item,
+    signal: "এখন কিনতে পারেন (Strong Buy)",
+    signal_code: 2
+  }));
+
+  // Top 3: Lowest-priced active trending companies (< 100 BDT)
+  const lowThree = safePool.filter(x => Number(x.price || 0) < 100)
     .sort((x, y) => Number(x.price || 0) - Number(y.price || 0))
     .slice(0, 3);
 
-  // Row 2: 3 Mid/Large-Cap Quality Company Strong Buy shares (>= 100 BDT)
-  const highThree = pool.filter(x => Number(x.price || 0) >= 100)
+  // Bottom 3: Mid-cap & large-cap quality companies (>= 100 BDT)
+  const highThree = safePool.filter(x => Number(x.price || 0) >= 100)
     .sort((x, y) => Number(y.buy_score || y.confidence || 0) - Number(x.buy_score || x.confidence || 0))
     .slice(0, 3)
     .sort((x, y) => Number(x.price || 0) - Number(y.price || 0));
@@ -38,7 +47,7 @@ function sortThreeLowThreeHigh(list) {
   const combined = [...lowThree, ...highThree];
   if (combined.length >= 6) return combined;
 
-  const rest = pool.filter(x => !combined.includes(x))
+  const rest = safePool.filter(x => !combined.includes(x))
     .sort((x, y) => Number(x.price || 0) - Number(y.price || 0));
   return [...combined, ...rest].slice(0, 6);
 }
@@ -107,6 +116,11 @@ function buildInstitutionalAnalysis(data) {
   const bbUpper = sma20 + 2 * stdDev;
   const bbLower = sma20 - 2 * stdDev;
   const bbPctB = (price - bbLower) / ((bbUpper - bbLower) || 1);
+  const bbWidthPct = ((bbUpper - bbLower) / (sma20 || 1)) * 100;
+  const max20 = Math.max(...recent20, price);
+  const min20 = Math.min(...recent20, price);
+  const channelRangePct = ((max20 - min20) / (min20 || 1)) * 100;
+  const isSidewaysMarket = recent20.length >= 6 && bbWidthPct < 2.4 && channelRangePct < 2.6 && Math.abs(roc5) < 0.75;
 
   // Stochastic %K & Williams %R
   const high14 = Math.max(...closes.slice(-14), price);
@@ -167,7 +181,9 @@ function buildInstitutionalAnalysis(data) {
 
   const isHomeRadarPick = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("pick") === "buy";
   let actionType = "HOLD";
-  if ((bullCount >= 13 && mlSignalCode !== 0) || (isHomeRadarPick && mlSignalCode !== 0 && bearCount <= 10)) {
+  if (isSidewaysMarket && !isHomeRadarPick) {
+    actionType = "SIDEWAYS";
+  } else if ((bullCount >= 13 && mlSignalCode !== 0) || (isHomeRadarPick && mlSignalCode !== 0 && bearCount <= 10)) {
     actionType = "BUY";
   } else if (bearCount >= 12 || mlSignalCode === 0) {
     actionType = "SELL";
@@ -193,6 +209,11 @@ function buildInstitutionalAnalysis(data) {
     decisionTitle = "🔻 চূড়ান্ত AI সিদ্ধান্ত: বিক্রি বা সতর্ক থাকুন";
     decisionSummary = `বিশ্লেষণে দেখা যাচ্ছে <strong>${sym} (${exch})</strong> শেয়ারটির ২০টি সূচকের মধ্যে <strong>${bearCount}টিই নেতিবাচক</strong> চাপ নির্দেশ করছে। উপরের রেজিস্ট্যান্স বাধায় শেয়ারটি নিচের দিকে নামার ঝুঁকিতে রয়েছে।`;
     actionAdvice = `হাতে শেয়ার থাকলে বর্তমান দর <strong>৳${price.toFixed(2)}</strong>-এ মুনাফা তুলে নেওয়া নিরাপদ। শেয়ারটি নিচের সাপোর্ট <strong>৳${s1.toFixed(2)}</strong> (ঝুঁকি <strong>-${riskPct}%</strong>) পর্যন্ত স্থিতিশীল না হওয়া পর্যন্ত নতুন করে কিনবেন না।`;
+  } else if (actionType === "SIDEWAYS") {
+    badgeText = "সাইডওয়ে মার্কেট — এড়িয়ে চলুন (Sideways / Flat)";
+    decisionTitle = "⏸️ চূড়ান্ত AI সিদ্ধান্ত: সাইডওয়ে মার্কেট (এখন এন্ট্রি নয়)";
+    decisionSummary = `মার্কেট রিসার্চে দেখা যাচ্ছে <strong>${sym} (${exch})</strong> শেয়ারটি বর্তমানে একটি সংকীর্ণ <strong>সাইডওয়ে (Sideways)</strong> রেঞ্জে আটকে আছে (২০-দিনের ওঠানামার হার মাত্র <strong>${channelRangePct.toFixed(1)}%</strong>)। এই অবস্থায় শেয়ার কিনলে মূলধন আটকে থাকার সম্ভাবনা বেশি।`;
+    actionAdvice = `সাইডওয়ে বাজার এড়িয়ে চলুন। শেয়ারটি উপরের রেজিস্ট্যান্স <strong>৳${r1.toFixed(2)}</strong> শক্তিশালী ভলিউমসহ ব্রেকআউট না করা পর্যন্ত নতুন করে কিনবেন না।`;
   } else {
     badgeText = "হোল্ড / পর্যবেক্ষণ করুন (Hold)";
     decisionTitle = "⚖️ চূড়ান্ত AI সিদ্ধান্ত: এখনই তাড়াহুড়ো নয়, পর্যবেক্ষণ করুন";
@@ -232,7 +253,7 @@ function buildInstitutionalAnalysis(data) {
   return { actionType, badgeText, s1, s2, r1, r2, fullReport: finalReport };
 }
 
-if (!localStorage.getItem("ms_cache_v5")) { localStorage.clear(); localStorage.setItem("ms_cache_v5", "1"); }
+if (!localStorage.getItem("ms_cache_v6")) { localStorage.clear(); localStorage.setItem("ms_cache_v6", "1"); }
 
 // Dynamic Hero Slideshow from 3:00 PM Daily Trained Exclusive Picks
 function startDynamicHeroSlideshow(picks) {

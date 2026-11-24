@@ -165,7 +165,7 @@ def generate_humanized_advice(symbol, exchange, price, rsi, signal, confidence, 
 
 
 def score_stock_quick(symbol, c, o, h, l, ycp):
-    """Fast ML scoring without extra LLM calls for landing page dynamic list"""
+    """Fast ML + Anti-Sideways Market Research scoring for landing page dynamic list"""
     ycp = ycp if ycp > 0 else o
     sma = (c + o + ycp) / 3.0
     ema = (c * 0.25) + (sma * 0.75)
@@ -173,6 +173,11 @@ def score_stock_quick(symbol, c, o, h, l, ycp):
     bb_low = min(l, sma * 0.96)
     ret_1d = (c - ycp) / (ycp + 1e-9)
     est_rsi = min(85.0, max(20.0, 50.0 + (ret_1d * 400)))
+
+    # Measure intraday & swing volatility to detect dead/sideways stocks
+    intraday_range_pct = ((max(h, c, o) - min(l, c, o)) / (ycp + 1e-9)) * 100.0
+    bb_width_pct = ((bb_high - bb_low) / (sma + 1e-9)) * 100.0
+    is_sideways = (abs(ret_1d * 100.0) < 0.45 and intraday_range_pct < 1.15) or (bb_width_pct < 2.2)
 
     row = pd.DataFrame([{
         'sma_20': sma,
@@ -187,7 +192,7 @@ def score_stock_quick(symbol, c, o, h, l, ycp):
         'return_1d': ret_1d,
         'return_3d': ret_1d * 1.4,
         'return_5d': ret_1d * 1.8,
-        'vol_ratio': 1.2,
+        'vol_ratio': 1.35 if not is_sideways else 0.65,
         'close_sma_ratio': c / sma,
         'close_ema_ratio': c / ema,
         'sma_ema_diff': (ema - sma) / sma,
@@ -198,19 +203,25 @@ def score_stock_quick(symbol, c, o, h, l, ycp):
     probs = model.predict_proba(row)[0]
     buy_prob = float(probs[2]) * 100 if len(probs) > 2 else float(np.max(probs)) * 100
     confidence = float(np.max(probs)) * 100
-    target_price = round(max(c * 1.05, bb_high), 2)
+    target_price = round(max(c * 1.055, bb_high), 2)
     stop_loss = round(min(c * 0.96, bb_low), 2)
     change_pct = round(ret_1d * 100, 2)
+
+    # Penalize sideways/flat stocks heavily so only active trending stocks rank at the top
+    momentum_bonus = (change_pct * 3.0) + (intraday_range_pct * 2.5)
+    final_buy_score = round(buy_prob + momentum_bonus - (35.0 if is_sideways else 0.0), 2)
 
     return {
         "symbol": symbol,
         "exchange": "DSE",
         "price": round(c, 2),
         "change_pct": change_pct,
-        "signal_code": pred_class,
-        "signal": "Strong Buy" if pred_class == 2 else ("Accumulate / Buy Zone" if change_pct >= 0 else "Watchlist"),
+        "volatility_pct": round(intraday_range_pct, 2),
+        "is_sideways": bool(is_sideways),
+        "signal_code": 1 if is_sideways else pred_class,
+        "signal": "Sideways / Wait" if is_sideways else ("Strong Buy" if pred_class == 2 else ("Accumulate / Buy Zone" if change_pct > 0 else "Watchlist")),
         "confidence": round(confidence, 2),
-        "buy_score": round(buy_prob + (change_pct * 2), 2),
+        "buy_score": final_buy_score,
         "target_price": target_price,
         "stop_loss": stop_loss,
         "rsi": round(est_rsi, 1)
@@ -457,32 +468,39 @@ def get_dynamic_top_picks():
             except Exception:
                 continue
 
-    # Strictly select true Strong Buy candidates (bullish ML + healthy RSI + positive momentum)
-    true_buys = [
+    # Strictly exclude Sideways/Flat stocks and select active momentum Strong Buy candidates
+    active_buys = [
         x for x in scored_list
-        if x["signal_code"] == 2 and x["change_pct"] >= 0 and 42 <= x["rsi"] <= 66
+        if not x.get("is_sideways", False)
+        and x["signal_code"] == 2
+        and x["change_pct"] >= 0.35
+        and 44 <= x["rsi"] <= 66
     ]
-    if len(true_buys) < 6:
-        extra = [
+    if len(active_buys) < 6:
+        fallback_active = [
             x for x in scored_list
-            if x not in true_buys and x["signal_code"] != 0 and x["change_pct"] >= 0 and 40 <= x["rsi"] <= 68
+            if x not in active_buys
+            and not x.get("is_sideways", False)
+            and x["signal_code"] != 0
+            and x["change_pct"] > 0
+            and 40 <= x["rsi"] <= 68
         ]
-        extra.sort(key=lambda x: x["buy_score"], reverse=True)
-        true_buys.extend(extra)
+        fallback_active.sort(key=lambda x: x["buy_score"], reverse=True)
+        active_buys.extend(fallback_active)
 
-    # Top row: 3 ABSOLUTE LOWEST-PRICED Strong Buy stocks (< 100 BDT)
-    low_candidates = [x for x in true_buys if x["price"] < 100]
+    # Top 3: Lowest-priced active trending Strong Buy companies (< 100 BDT)
+    low_candidates = [x for x in active_buys if x["price"] < 100]
     low_candidates.sort(key=lambda x: x["price"])
     low_tier = low_candidates[:3]
 
-    # Bottom row: 3 Mid-Cap / Blue-Chip Strong Buy stocks (>= 100 BDT)
-    high_candidates = [x for x in true_buys if x["price"] >= 100]
+    # Bottom 3: Mid-cap & Blue-chip active trending Strong Buy companies (>= 100 BDT)
+    high_candidates = [x for x in active_buys if x["price"] >= 100]
     high_candidates.sort(key=lambda x: x["buy_score"], reverse=True)
     high_tier = sorted(high_candidates[:3], key=lambda x: x["price"])
 
     top_6 = (low_tier + high_tier)[:6]
     if len(top_6) < 6:
-        rem = [x for x in sorted(true_buys, key=lambda i: i["price"]) if x not in top_6]
+        rem = [x for x in sorted(active_buys, key=lambda i: i["price"]) if x not in top_6]
         top_6.extend(rem[:6 - len(top_6)])
 
     result_payload = {
