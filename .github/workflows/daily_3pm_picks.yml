@@ -1,0 +1,28 @@
+name: Daily 3PM BST AI Stock Picks Update
+on:
+  schedule:
+    - cron: '0 9 * * 0,1,2,3,4' # 3:00 PM BST (Sun-Thu after DSE 2:30 PM close)
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update-picks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: pip install -r backend/requirements.txt
+      - name: Run MukiSoft AI 3:00 PM Market Analysis
+        run: python3 scripts/generate_daily_picks.py
+      - name: Commit updated daily_picks.json
+        run: |
+          git config user.name "MukiSoft AI Bot"
+          git config user.email "bot@mukisoft.tech"
+          git add frontend/assets/daily_picks.json
+          git diff --staged --quiet || git commit -m "Auto-update 3:00 PM BST Strong Buy stock picks"
+          git push

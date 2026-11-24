@@ -626,11 +626,8 @@ def get_dynamic_top_picks():
     )[:18]
 
     def check_candidate(cand):
-        verified = verify_true_strong_buy_20(cand["symbol"], "DSE")
-        if verified:
-            return verified
-        # Secondary tier: if ML Strong Buy & positive momentum, include as backup so 6 slots are always filled
-        if cand["signal_code"] == 2 and cand["change_pct"] > 0 and 40 <= cand["rsi"] <= 68:
+        # Fast vectorized check (no slow 36-stock external HTTP scraping during user request)
+        if cand["signal_code"] == 2 and cand["change_pct"] >= 0.25 and 42 <= cand["rsi"] <= 68:
             c_copy = dict(cand)
             c_copy["signal"] = "Strong Buy"
             c_copy["signal_code"] = 2

@@ -1,4 +1,34 @@
 
+// === Instant 0ms 3:00 PM BST Static-Speed JSON Loader (Dynamic Daily Update) ===
+(function attachInstantDailyPicks() {
+  const originalFetch = window.fetch.bind(window);
+  window.fetch = async function(resource, init) {
+    const urlStr = typeof resource === "string" ? resource : (resource && resource.url ? resource.url : "");
+    if (urlStr.includes("/api/top-picks")) {
+      try {
+        const staticRes = await originalFetch(`assets/daily_picks.json?cycle=${getBstCycleStamp()}`, { cache: "no-store" });
+        if (staticRes.ok) {
+          const staticJson = await staticRes.json();
+          if (staticJson && Array.isArray(staticJson.picks) && staticJson.picks.length >= 4) {
+            return new Response(JSON.stringify({
+              session: {
+                is_live: false,
+                badge: "📊 ৩:০০ PM ডেইলি AI লক • পরবর্তী সেশন সকাল ১০:০০টা",
+                headline: "আগামী কার্যদিবসে বাই করার সেরা স্টকসমূহ",
+                subtext: `সর্বশেষ আপডেট: ${staticJson.generated_at_bst || "আজ বিকাল ৩:০০টা (BST)"} — MukiSoft ML + ২০-ইন্ডিকেটর বিশ্লেষণে বাছাইকৃত`,
+                bd_time: staticJson.generated_at_bst || ""
+              },
+              picks: staticJson.picks
+            }), { status: 200, headers: { "Content-Type": "application/json" } });
+          }
+        }
+      } catch (e) {}
+    }
+    return originalFetch(resource, init);
+  };
+})();
+
+
 function getBstCycleStamp() {
   const nowUtc = new Date();
   const bst = new Date(nowUtc.getTime() + 6 * 3600 * 1000);
@@ -254,7 +284,7 @@ function buildInstitutionalAnalysis(data) {
   return { actionType, badgeText, s1, s2, r1, r2, fullReport: finalReport };
 }
 
-if (!localStorage.getItem("ms_cache_v10")) { localStorage.clear(); localStorage.setItem("ms_cache_v10", "1"); }
+if (!localStorage.getItem("ms_cache_v11")) { localStorage.clear(); localStorage.setItem("ms_cache_v11", "1"); }
 
 // Dynamic Hero Slideshow from 3:00 PM Daily Trained Exclusive Picks
 function startDynamicHeroSlideshow(picks) {
