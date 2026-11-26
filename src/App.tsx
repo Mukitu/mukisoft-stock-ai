@@ -10,6 +10,7 @@ import { DashboardPage } from './pages/DashboardPage';
 import { AboutPage } from './pages/AboutPage';
 import { ContactPage } from './pages/ContactPage';
 import { RiskDisclosurePage } from './pages/RiskDisclosurePage';
+import { SessionEnforcer } from './components/bdapps/SessionEnforcer';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -24,6 +25,7 @@ export function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
+        <SessionEnforcer />
         <div className="min-h-screen w-full max-w-full overflow-x-hidden flex flex-col bg-slate-50 text-slate-900">
           <MarketTickerBar />
           <Navbar />

@@ -20,10 +20,9 @@ import { FreeQuotaPaywallModal } from '../components/bdapps/FreeQuotaPaywallModa
 import { FreeQuotaBanner } from '../components/common/FreeQuotaBanner';
 import { SelfRiskDisclaimerBanner } from '../components/common/SelfRiskDisclaimerBanner';
 import { useFreeQuota } from '../hooks/useFreeQuota';
-import { consumeBdappsToast } from '../services/bdappsService';
+import { BDAPPS_TOAST_EVENT, consumeBdappsToast } from '../services/bdappsService';
 import { LIVE_FEED_WAITING_BN } from '../services/apiClient';
 import {
-  STRONG_BUY_BADGE_BN,
   formatStrongBuyConsensusLine,
 } from '../utils/quantConsensus';
 
@@ -62,7 +61,18 @@ export function HomePage() {
     if (pendingToast) {
       setToastMsg(pendingToast);
     }
+
+    const onToastEvent = (evt: Event) => {
+      const nextMsg = (evt as CustomEvent<string>).detail || consumeBdappsToast();
+      if (nextMsg) {
+        consumeBdappsToast();
+        setToastMsg(nextMsg);
+      }
+    };
+    window.addEventListener(BDAPPS_TOAST_EVENT, onToastEvent);
+
     return () => {
+      window.removeEventListener(BDAPPS_TOAST_EVENT, onToastEvent);
       if (highlightTimerRef.current !== null) {
         window.clearTimeout(highlightTimerRef.current);
       }
@@ -392,8 +402,7 @@ export function HomePage() {
                             <div className="text-lg font-bold text-slate-900 mt-0.5">••••••••</div>
                           </div>
                           <div className="text-right">
-                            <div className="text-xs font-bold text-emerald-700">{STRONG_BUY_BADGE_BN}</div>
-                            <div className="text-[11px] text-slate-500 font-mono-num">••/20</div>
+                            <div className="text-[11px] text-slate-500 font-mono-num">কনফিডেন্স ••.%</div>
                           </div>
                         </div>
 
@@ -470,10 +479,7 @@ export function HomePage() {
                           </div>
                         </div>
                         <div className="text-right shrink-0">
-                          <span className="inline-block text-[11px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded">
-                            {STRONG_BUY_BADGE_BN}
-                          </span>
-                          <div className="text-[11px] text-slate-500 font-mono-num mt-1">
+                          <div className="text-[11px] text-slate-500 font-mono-num">
                             কনফিডেন্স {item.confidence.toFixed(1)}%
                           </div>
                         </div>

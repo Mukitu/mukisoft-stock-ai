@@ -9,12 +9,14 @@ from __future__ import annotations
 import asyncio
 import base64
 import datetime as dt
+import hashlib
 import io
 import json
 import logging
 import os
 import re
 import tempfile
+import threading
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -57,10 +59,12 @@ os.environ.setdefault("BDSHARE_SOURCE", "new")
 
 BASE_DIR = Path(__file__).resolve().parent
 DAILY_CACHE_FILE = BASE_DIR / "daily_picks_cache.json"
+SUBSCRIBER_SESSIONS_FILE = BASE_DIR / "subscriber_sessions.json"
 AI_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
 BDAPPS_API_BASE = os.getenv("BDAPPS_API_BASE", "https://stock.skillproof.top").strip().rstrip("/")
 ALLOWED_BDAPPS_HOSTS = {"stock.skillproof.top", "skillproof.top", "www.skillproof.top"}
 BD_MOBILE_REGEX = re.compile(r"^\+?8801[3-9][0-9]{8}$")
+SESSION_TOKEN_REGEX = re.compile(r"^[A-Za-z0-9_-]{8,128}$")
 
 SYMBOL_REGEX = re.compile(r"^[A-Z0-9&().-]{1,20}$")
 MAX_UPLOAD_FILES = 5
@@ -122,6 +126,9 @@ _TTL_CACHE: dict[str, tuple[float, Any]] = {}
 _DAILY_PICKS_MEMORY: dict[str, Any] = {"date_key": "", "data": None}
 _TOP_PICKS_LOCK: asyncio.Lock | None = None
 _http_client: httpx.AsyncClient | None = None
+_SESSION_STORE_LOCK = threading.Lock()
+_SUBSCRIBER_SESSIONS_MEM: dict[str, dict[str, Any]] = {}
+_SESSION_TTL_MS = 30 * 24 * 3600 * 1000  # 30 days
 
 
 def cache_get(key: str) -> Any | None:
@@ -224,30 +231,72 @@ def _normalize_bd_mobile(raw_mobile: str | None, raw_subscriber_id: str | None) 
     return None
 
 
-async def verify_bdapps_subscriber(
+class SubscriberSessionPayload(BaseModel):
+    mobile: str | None = Field(default=None, max_length=24)
+    subscriberId: str | None = Field(default=None, max_length=64)
+    sessionToken: str = Field(..., min_length=8, max_length=128)
+    source: Literal["check_subscription", "send_otp", "verify_otp"] = "check_subscription"
+    verifiedAt: int | None = Field(default=None, ge=0)
+
+
+def _subscriber_key(normalized_mobile: str) -> str:
+    return hashlib.sha256(normalized_mobile.encode("utf-8")).hexdigest()
+
+
+def _load_session_store_unlocked() -> dict[str, dict[str, Any]]:
+    store: dict[str, dict[str, Any]] = {}
+    if SUBSCRIBER_SESSIONS_FILE.exists():
+        try:
+            raw = json.loads(SUBSCRIBER_SESSIONS_FILE.read_text(encoding="utf-8"))
+            if isinstance(raw, dict):
+                store.update(raw)
+        except Exception as exc:
+            logger.warning("Failed reading subscriber sessions store: %s", exc)
+    store.update(_SUBSCRIBER_SESSIONS_MEM)
+    return store
+
+
+def _save_session_store_unlocked(store: dict[str, dict[str, Any]]) -> None:
+    now_ms = int(time.time() * 1000)
+    cleaned = {
+        k: v
+        for k, v in store.items()
+        if isinstance(v, dict) and (now_ms - int(v.get("updatedAt", now_ms))) < _SESSION_TTL_MS
+    }
+    _SUBSCRIBER_SESSIONS_MEM.clear()
+    _SUBSCRIBER_SESSIONS_MEM.update(cleaned)
+    try:
+        fd, tmp_path = tempfile.mkstemp(dir=str(BASE_DIR), suffix=".tmp")
+        with os.fdopen(fd, "w", encoding="utf-8") as tmp_file:
+            json.dump(cleaned, tmp_file)
+        os.replace(tmp_path, SUBSCRIBER_SESSIONS_FILE)
+    except Exception as exc:
+        logger.warning("Failed persisting subscriber sessions atomically: %s", exc)
+
+
+async def _check_bdapps_status_detailed(
     subscriber_id: str | None,
     mobile: str | None,
-) -> bool:
-    """
-    Verifies a claimed BDApps Robi & Cirkle subscriber server-side against
-    check_subscription.php (allowlisted HTTPS host) so spoofed headers cannot bypass quota.
-    """
+    *,
+    bypass_cache: bool = False,
+) -> tuple[bool | None, str]:
     normalized_mobile = _normalize_bd_mobile(mobile, subscriber_id)
     if not normalized_mobile:
-        return False
+        return False, "INVALID_MOBILE"
 
     cache_key = f"bdapps_sub:{normalized_mobile}"
-    cached = cache_get(cache_key)
-    if cached is not None:
-        return bool(cached)
+    if not bypass_cache:
+        cached = cache_get(cache_key)
+        if cached is not None:
+            return bool(cached), "REGISTERED" if cached else "UNREGISTERED"
 
     parsed_base = urlparse(BDAPPS_API_BASE)
     if parsed_base.scheme != "https" or (parsed_base.hostname or "").lower() not in ALLOWED_BDAPPS_HOSTS:
         logger.warning("Blocked unallowlisted BDAPPS_API_BASE host: %s", BDAPPS_API_BASE)
-        return False
+        return None, "UNALLOWLISTED"
 
     if _http_client is None:
-        return False
+        return None, "NO_CLIENT"
 
     try:
         resp = await _http_client.post(
@@ -273,10 +322,22 @@ async def verify_bdapps_subscriber(
                 )
             )
             cache_set(cache_key, is_active, ttl_seconds=300 if is_active else 30)
-            return is_active
+            return is_active, status or ("REGISTERED" if is_active else "UNREGISTERED")
     except Exception as exc:
         logger.warning("BDApps subscriber verification skipped due to network error: %s", exc)
-    return False
+    return None, "NETWORK_ERROR"
+
+
+async def verify_bdapps_subscriber(
+    subscriber_id: str | None,
+    mobile: str | None,
+) -> bool:
+    """
+    Verifies a claimed BDApps Robi & Cirkle subscriber server-side against
+    check_subscription.php (allowlisted HTTPS host) so spoofed headers cannot bypass quota.
+    """
+    is_active, _ = await _check_bdapps_status_detailed(subscriber_id, mobile)
+    return bool(is_active)
 
 
 def _subscribed_quota_payload() -> dict[str, Any]:
@@ -896,6 +957,96 @@ async def analyze_document(
             status_code=400,
             detail="ডকুমেন্ট থেকে সঠিক বাজার দর শনাক্ত করা যায়নি। পরিষ্কার স্ক্রিনশট অথবা ম্যানুয়াল ইনপুট ব্যবহার করুন।",
         )
+
+
+@app.post("/api/subscriber-session/claim")
+async def claim_subscriber_session(payload: SubscriberSessionPayload) -> dict[str, Any]:
+    normalized_mobile = _normalize_bd_mobile(payload.mobile, payload.subscriberId)
+    if not normalized_mobile:
+        raise HTTPException(status_code=422, detail="সঠিক Robi & Cirkle নম্বর পাওয়া যায়নি।")
+
+    token = payload.sessionToken.strip()
+    if not SESSION_TOKEN_REGEX.match(token):
+        raise HTTPException(status_code=422, detail="Invalid session token format.")
+
+    if payload.source != "verify_otp":
+        is_active, _status = await _check_bdapps_status_detailed(
+            payload.subscriberId,
+            normalized_mobile,
+            bypass_cache=True,
+        )
+        if is_active is False:
+            raise HTTPException(status_code=403, detail="সাবস্ক্রিপশন বর্তমানে সক্রিয় নয়।")
+
+    key = _subscriber_key(normalized_mobile)
+    now_ms = int(time.time() * 1000)
+    with _SESSION_STORE_LOCK:
+        store = _load_session_store_unlocked()
+        store[key] = {
+            "sessionToken": token,
+            "status": "ACTIVE",
+            "updatedAt": now_ms,
+        }
+        _save_session_store_unlocked(store)
+
+    cache_set(f"bdapps_sub:{normalized_mobile}", True, ttl_seconds=300)
+    return {"claimed": True, "sessionToken": token, "updatedAt": now_ms}
+
+
+@app.post("/api/subscriber-session/verify")
+async def verify_subscriber_session(payload: SubscriberSessionPayload) -> dict[str, Any]:
+    normalized_mobile = _normalize_bd_mobile(payload.mobile, payload.subscriberId)
+    if not normalized_mobile:
+        return {"valid": False, "reason": "UNSUBSCRIBED"}
+
+    token = payload.sessionToken.strip()
+    if not SESSION_TOKEN_REGEX.match(token):
+        return {"valid": False, "reason": "SESSION_REPLACED"}
+
+    key = _subscriber_key(normalized_mobile)
+    now_ms = int(time.time() * 1000)
+
+    with _SESSION_STORE_LOCK:
+        store = _load_session_store_unlocked()
+        record = store.get(key)
+        if isinstance(record, dict):
+            if record.get("status") == "UNSUBSCRIBED":
+                return {"valid": False, "reason": "UNSUBSCRIBED", "updatedAt": record.get("updatedAt")}
+            stored_token = str(record.get("sessionToken") or "")
+            if stored_token and stored_token != token:
+                return {"valid": False, "reason": "SESSION_REPLACED", "updatedAt": record.get("updatedAt")}
+        else:
+            # First sight after cold restart: adopt the provided token so subsequent Browser B logins displace it
+            store[key] = {
+                "sessionToken": token,
+                "status": "ACTIVE",
+                "updatedAt": now_ms,
+            }
+            _save_session_store_unlocked(store)
+
+    return {"valid": True, "reason": "OK"}
+
+
+@app.post("/api/subscriber-session/release")
+async def release_subscriber_session(payload: SubscriberSessionPayload) -> dict[str, Any]:
+    normalized_mobile = _normalize_bd_mobile(payload.mobile, payload.subscriberId)
+    if not normalized_mobile:
+        return {"released": True}
+
+    key = _subscriber_key(normalized_mobile)
+    now_ms = int(time.time() * 1000)
+    _TTL_CACHE.pop(f"bdapps_sub:{normalized_mobile}", None)
+
+    with _SESSION_STORE_LOCK:
+        store = _load_session_store_unlocked()
+        store[key] = {
+            "sessionToken": "__UNSUBSCRIBED__",
+            "status": "UNSUBSCRIBED",
+            "updatedAt": now_ms,
+        }
+        _save_session_store_unlocked(store)
+
+    return {"released": True, "updatedAt": now_ms}
 
 
 @app.post("/api/contact")

@@ -16,10 +16,12 @@ import {
   X,
 } from 'lucide-react';
 import {
+  BDAPPS_SESSION_EVENT,
+  SESSION_REPLACED_TOAST_BN,
+  UNSUBSCRIBED_TOAST_BN,
   type BdappsSession,
   buildActiveSessionFromResponse,
   checkBdappsSubscription,
-  clearBdappsSession,
   consumeBdappsToast,
   getBdappsSession,
   isActiveSubscriptionPayload,
@@ -29,15 +31,17 @@ import {
   maskBdMobile,
   maskSubscriberId,
   normalizeSubscriptionStatus,
+  purgeAllSubscriberState,
+  releaseSubscriberSession,
   saveBdappsSession,
   setBdappsToast,
   unsubscribeBdapps,
+  verifyActiveSubscriberSession,
 } from '../services/bdappsService';
 import { useTopPicks } from '../hooks/useMarketQueries';
 import { LIVE_FEED_WAITING_BN } from '../services/apiClient';
 import { SelfRiskDisclaimerBanner } from '../components/common/SelfRiskDisclaimerBanner';
 import {
-  STRONG_BUY_BADGE_BN,
   formatStrongBuyConsensusLine,
 } from '../utils/quantConsensus';
 
@@ -87,6 +91,28 @@ export function DashboardPage() {
       if (manualTrigger) setRecheckNotice(null);
 
       try {
+        const lockVerdict = await verifyActiveSubscriberSession(currentSession);
+        if (lockVerdict === 'session_replaced') {
+          purgeAllSubscriberState({
+            forceClearLock: false,
+            currentSessionToken: currentSession.sessionToken,
+          });
+          setBdappsToast(SESSION_REPLACED_TOAST_BN);
+          navigate('/', { replace: true });
+          return;
+        }
+        if (lockVerdict === 'unsubscribed') {
+          purgeAllSubscriberState({
+            forceClearLock: true,
+            currentSessionToken: currentSession.sessionToken,
+          });
+          setBdappsToast(
+            'আপনার Robi & Cirkle সাবস্ক্রিপশনটি বর্তমানে সক্রিয় নয়। পুনরায় অ্যাক্টিভেট করতে মোবাইল নম্বর দিয়ে OTP ভেরিফাই করুন।'
+          );
+          navigate('/', { replace: true });
+          return;
+        }
+
         const res = await checkBdappsSubscription(currentSession.mobile);
 
         if (isActiveSubscriptionPayload(res)) {
@@ -97,6 +123,7 @@ export function DashboardPage() {
             {
               consentAccepted: currentSession.consentAccepted ?? true,
               consentTimestamp: currentSession.consentTimestamp,
+              sessionToken: currentSession.sessionToken,
             }
           );
           // Preserve original verifiedAt when refreshing so grace window math stays accurate
@@ -123,7 +150,11 @@ export function DashboardPage() {
           }
 
           // Outside 5-minute grace window and confirmed UNREGISTERED -> lock & bounce to /
-          clearBdappsSession();
+          await releaseSubscriberSession(currentSession);
+          purgeAllSubscriberState({
+            forceClearLock: true,
+            currentSessionToken: currentSession.sessionToken,
+          });
           setBdappsToast(
             'আপনার Robi & Cirkle সাবস্ক্রিপশনটি বর্তমানে সক্রিয় নয়। পুনরায় অ্যাক্টিভেট করতে মোবাইল নম্বর দিয়ে OTP ভেরিফাই করুন।'
           );
@@ -184,6 +215,16 @@ export function DashboardPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // React immediately if SessionEnforcer invalidates this session while on /dashboard
+  useEffect(() => {
+    const onSessionUpdated = (evt: Event) => {
+      const next = (evt as CustomEvent<BdappsSession | null>).detail ?? null;
+      setSession(next);
+    };
+    window.addEventListener(BDAPPS_SESSION_EVENT, onSessionUpdated);
+    return () => window.removeEventListener(BDAPPS_SESSION_EVENT, onSessionUpdated);
+  }, []);
+
   if (!isSessionActive(session)) {
     return <Navigate to="/" replace />;
   }
@@ -195,12 +236,26 @@ export function DashboardPage() {
     setUnsubError(null);
     setIsUnsubscribing(true);
     try {
-      await unsubscribeBdapps({
+      const res = await unsubscribeBdapps({
         subscriberId: session.subscriberId,
         userMobile: session.mobile,
       });
-      clearBdappsSession();
-      setBdappsToast('আপনার MukiSoft Stock AI সাবস্ক্রিপশন সফলভাবে বাতিল করা হয়েছে।');
+      if (res.success === false && res.isSubscribed !== false) {
+        setUnsubError(
+          res.message ||
+            res.statusDetail ||
+            res.error ||
+            'সাবস্ক্রিপশন বাতিল করা সম্ভব হয়নি। অনুগ্রহ করে আবার চেষ্টা করুন।'
+        );
+        return;
+      }
+
+      await releaseSubscriberSession(session);
+      purgeAllSubscriberState({
+        forceClearLock: true,
+        currentSessionToken: session.sessionToken,
+      });
+      setBdappsToast(UNSUBSCRIBED_TOAST_BN);
       navigate('/', { replace: true });
     } catch (err) {
       setUnsubError(
@@ -438,8 +493,8 @@ export function DashboardPage() {
                   >
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-sm font-bold text-slate-900">{pick.symbol}</span>
-                      <span className="text-[10px] font-bold text-emerald-700 truncate">
-                        {STRONG_BUY_BADGE_BN}
+                      <span className="text-[11px] text-slate-500 font-mono-num">
+                        কনফিডেন্স {pick.confidence.toFixed(1)}%
                       </span>
                     </div>
                     <div className="text-[11px] font-semibold text-emerald-800 leading-snug">

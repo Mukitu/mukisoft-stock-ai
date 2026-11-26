@@ -14,6 +14,7 @@ import {
   ROBI_CIRKLE_DIGITS_REGEX,
   buildActiveSessionFromResponse,
   checkBdappsSubscription,
+  claimSubscriberSession,
   clearPendingOtp,
   formatFullBdMobile,
   getBdappsSession,
@@ -177,6 +178,7 @@ export function BdappsSubscriptionCard({
           );
           saveBdappsSession(session);
           clearPendingOtp();
+          await claimSubscriberSession(session);
           setActiveSession(session);
           setStep('verified');
           setBdappsToast(PATH_A_WELCOME_TOAST);
@@ -231,6 +233,7 @@ export function BdappsSubscriptionCard({
         );
         saveBdappsSession(session);
         clearPendingOtp();
+        await claimSubscriberSession(session);
         setActiveSession(session);
         setStep('verified');
         setBdappsToast(PATH_A_WELCOME_TOAST);
@@ -300,6 +303,7 @@ export function BdappsSubscriptionCard({
         });
         saveBdappsSession(session);
         clearPendingOtp();
+        await claimSubscriberSession(session);
         setActiveSession(session);
         setBdappsToast(PATH_A_WELCOME_TOAST);
         if (onSubscribed) {
@@ -374,9 +378,10 @@ export function BdappsSubscriptionCard({
           consentAccepted: true,
           consentTimestamp: new Date().toISOString(),
         });
-        // Save session synchronously BEFORE immediate unmount-safe navigation/unlock
+        // Save session & claim single-browser lock BEFORE immediate navigation/unlock
         saveBdappsSession(session);
         clearPendingOtp();
+        await claimSubscriberSession(session);
         setActiveSession(session);
         setStep('verified');
         setBdappsToast(PATH_B_WELCOME_TOAST);
