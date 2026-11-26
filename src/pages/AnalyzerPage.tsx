@@ -158,8 +158,13 @@ export function AnalyzerPage() {
     authorizeLiveSymbol,
   ]);
 
-  // If /api/analyze itself returns HTTP 429, immediately block and show Bangla Paywall Modal
+  // If /api/analyze itself returns HTTP 429 (only for non-subscribers), block & show Bangla Paywall Modal
   useEffect(() => {
+    if (isSubscribed) {
+      setQuotaBlocked(false);
+      setPaywallOpen(false);
+      return;
+    }
     if (queryError instanceof QuotaExceededError) {
       setQuotaBlocked(true);
       setAuthorizedKey('');
@@ -171,7 +176,7 @@ export function AnalyzerPage() {
       });
       setPaywallOpen(true);
     }
-  }, [queryError, activeQuery.symbol, activeQuery.exchange]);
+  }, [isSubscribed, queryError, activeQuery.symbol, activeQuery.exchange]);
 
   // Sync URL query params if user navigates via deep link
   useEffect(() => {
@@ -695,7 +700,7 @@ export function AnalyzerPage() {
       )}
 
       {/* Results Dashboard */}
-      {quotaBlocked ? (
+      {!isSubscribed && quotaBlocked ? (
         <div className="bg-white border border-amber-300 rounded-xl p-8 sm:p-10 text-center space-y-4">
           <div className="w-12 h-12 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center mx-auto">
             <Lock className="w-6 h-6" />
@@ -863,7 +868,7 @@ export function AnalyzerPage() {
       ) : null}
       {/* Tamper-Proof 24-Hour Free Quota Paywall Modal */}
       <FreeQuotaPaywallModal
-        isOpen={paywallOpen}
+        isOpen={!isSubscribed && paywallOpen}
         resetInSeconds={liveResetSeconds}
         requestedSymbol={
           pendingAction?.type === 'manual'

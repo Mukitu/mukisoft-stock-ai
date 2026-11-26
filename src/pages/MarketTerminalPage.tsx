@@ -38,7 +38,16 @@ export function MarketTerminalPage() {
   });
 
   const [paywallOpen, setPaywallOpen] = useState(false);
-  const { liveResetSeconds, markSubscribed } = useFreeQuota();
+  const { isSubscribed, liveResetSeconds, markSubscribed } = useFreeQuota();
+
+  // For active subscribers opening /market directly (e.g., from Dashboard or Navbar),
+  // automatically load the default sector stock instead of leaving an empty placeholder.
+  useEffect(() => {
+    if (isSubscribed && !symbol) {
+      const defaultSym = DSE_CSE_SECTORS[sector]?.[0] || 'SQURPHARMA';
+      setSymbol(defaultSym);
+    }
+  }, [isSubscribed, symbol, sector]);
 
   const {
     data: analysis,
@@ -47,14 +56,18 @@ export function MarketTerminalPage() {
     error: queryError,
     refetch,
   } = useStockAnalysis(symbol, exchange, symbol.length > 0);
-  const isQuotaError = queryError instanceof QuotaExceededError;
+  const isQuotaError = !isSubscribed && queryError instanceof QuotaExceededError;
   const report = analysis ? buildStructuredBanglaReport(analysis) : null;
 
   useEffect(() => {
+    if (isSubscribed) {
+      setPaywallOpen(false);
+      return;
+    }
     if (isQuotaError) {
       setPaywallOpen(true);
     }
-  }, [isQuotaError]);
+  }, [isQuotaError, isSubscribed]);
 
   const updateSelection = (nextSym: string, nextExch: Exchange) => {
     setSymbol(nextSym);
@@ -309,7 +322,7 @@ export function MarketTerminalPage() {
         </section>
       )}
       <FreeQuotaPaywallModal
-        isOpen={paywallOpen}
+        isOpen={!isSubscribed && paywallOpen}
         resetInSeconds={liveResetSeconds}
         requestedSymbol={symbol || undefined}
         onClose={() => setPaywallOpen(false)}

@@ -20,6 +20,7 @@ import {
   buildActiveSessionFromResponse,
   checkBdappsSubscription,
   clearBdappsSession,
+  consumeBdappsToast,
   getBdappsSession,
   isActiveSubscriptionPayload,
   isSessionActive,
@@ -42,6 +43,7 @@ import {
 
 interface DashboardLocationState {
   freshHandoff?: boolean;
+  welcomeToast?: string;
 }
 
 function formatVerifiedTimestamp(ts: number): string {
@@ -160,13 +162,22 @@ export function DashboardPage() {
     if (!isSessionActive(session)) return;
 
     if (locationState?.freshHandoff) {
+      const pendingToast = consumeBdappsToast();
       setRecheckNotice({
         tone: 'success',
-        text: 'স্বাগতম! আপনার Robi & Cirkle (বিডিঅ্যাপস) সাবস্ক্রিপশন সফলভাবে ভেরিফাই হয়েছে এবং প্রিমিয়াম ড্যাশবোর্ড আনলক আছে।',
+        text:
+          locationState.welcomeToast ||
+          pendingToast ||
+          'স্বাগতম! আপনার সাবস্ক্রিপশন সক্রিয় রয়েছে এবং প্রিমিয়াম ড্যাশবোর্ড আনলক আছে।',
       });
       // Replace location state so subsequent reloads perform a normal server check
       navigate('/dashboard', { replace: true, state: null });
       return;
+    }
+
+    const pendingToast = consumeBdappsToast();
+    if (pendingToast) {
+      setRecheckNotice({ tone: 'success', text: pendingToast });
     }
 
     void runServerRecheck(session, false);

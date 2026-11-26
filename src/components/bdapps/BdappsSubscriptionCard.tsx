@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   ArrowRight,
+  BarChart3,
   CheckCircle2,
   Loader2,
   RefreshCw,
@@ -9,6 +10,7 @@ import {
   Smartphone,
 } from 'lucide-react';
 import {
+  BDAPPS_SESSION_EVENT,
   ROBI_CIRKLE_DIGITS_REGEX,
   buildActiveSessionFromResponse,
   checkBdappsSubscription,
@@ -17,17 +19,24 @@ import {
   getBdappsSession,
   getPendingOtp,
   isActiveSubscriptionPayload,
+  isOtpChallengePayload,
   isSessionActive,
   maskBdMobile,
+  maskSubscriberId,
+  normalizeSubscriptionStatus,
   requestBdappsOtp,
   sanitizeBdLocalDigits,
   saveBdappsSession,
   savePendingOtp,
+  setBdappsToast,
   verifyBdappsOtp,
   type BdappsSession,
 } from '../../services/bdappsService';
 
 type CardStep = 'mobile' | 'otp' | 'verified';
+
+const PATH_A_WELCOME_TOAST = 'স্বাগতম! আপনার সাবস্ক্রিপশন সক্রিয় রয়েছে।';
+const PATH_B_WELCOME_TOAST = 'ভেরিফিকেশন সফল হয়েছে! স্বাগতম, আপনার প্রিমিয়াম ড্যাশবোর্ড এখন আনলক।';
 
 interface BdappsSubscriptionCardProps {
   highlighted?: boolean;
@@ -44,7 +53,15 @@ export function BdappsSubscriptionCard({
 }: BdappsSubscriptionCardProps) {
   const navigate = useNavigate();
 
-  const [step, setStep] = useState<CardStep>('mobile');
+  const initialSession = (() => {
+    const existing = getBdappsSession();
+    return isSessionActive(existing) ? existing : null;
+  })();
+
+  const [activeSession, setActiveSession] = useState<BdappsSession | null>(initialSession);
+  const [step, setStep] = useState<CardStep>(() =>
+    initialSession && !onSubscribed ? 'verified' : 'mobile'
+  );
   const [localDigits, setLocalDigits] = useState('');
   const [activeMobile, setActiveMobile] = useState('');
   const [referenceNo, setReferenceNo] = useState('');
@@ -63,15 +80,16 @@ export function BdappsSubscriptionCard({
   const CONSENT_REQUIRED_WARNING_BN =
     "এগিয়ে যেতে অনুগ্রহ করে উপরের 'I Agree' ঝুঁকি ও নীতিমালা সম্মতি বক্সে টিক দিন।";
 
-  // Auto-redirect returning verified Robi & Cirkle subscribers directly to /dashboard
-  // (when rendered inline on Home; inside Paywall Modal we invoke onSubscribed directly)
+  // Hydrate active subscriber state without hijacking Home navigation;
+  // inside Paywall Modal (onSubscribed provided) unlock immediately.
   useEffect(() => {
     const existing = getBdappsSession();
     if (isSessionActive(existing)) {
+      setActiveSession(existing);
       if (onSubscribed) {
         onSubscribed(existing);
       } else {
-        navigate('/dashboard', { replace: true });
+        setStep('verified');
       }
       return;
     }
@@ -84,7 +102,23 @@ export function BdappsSubscriptionCard({
       setReferenceNo(pending.referenceNo);
       setStep('otp');
     }
-  }, [navigate, onSubscribed]);
+  }, [onSubscribed]);
+
+  // Keep inline card synced if user unsubscribes or logs in elsewhere
+  useEffect(() => {
+    const onSessionUpdated = (evt: Event) => {
+      const next = (evt as CustomEvent<BdappsSession | null>).detail ?? getBdappsSession();
+      if (isSessionActive(next)) {
+        setActiveSession(next);
+        if (!onSubscribed) setStep('verified');
+      } else {
+        setActiveSession(null);
+        setStep('mobile');
+      }
+    };
+    window.addEventListener(BDAPPS_SESSION_EVENT, onSessionUpdated);
+    return () => window.removeEventListener(BDAPPS_SESSION_EVENT, onSessionUpdated);
+  }, [onSubscribed]);
 
   // 30-second resend cooldown timer
   useEffect(() => {
@@ -130,10 +164,11 @@ export function BdappsSubscriptionCard({
         consentTimestamp: new Date().toISOString(),
       };
 
-      // 1. Proactive Pre-check: check_subscription.php before sending OTP
+      // 1. Step 1 Pre-check: Always call check_subscription.php BEFORE sending OTP
       try {
         const precheck = await checkBdappsSubscription(fullMobile);
         if (isActiveSubscriptionPayload(precheck)) {
+          // Path A (Already Subscribed): Do NOT call send_otp.php; unlock & navigate immediately
           const session = buildActiveSessionFromResponse(
             fullMobile,
             precheck,
@@ -142,30 +177,51 @@ export function BdappsSubscriptionCard({
           );
           saveBdappsSession(session);
           clearPendingOtp();
+          setActiveSession(session);
           setStep('verified');
-          setStatusMsg(
-            onSubscribed
-              ? 'আপনার Robi & Cirkle সাবস্ক্রিপশন সক্রিয় আছে! আপনার কাঙ্ক্ষিত স্টক রিপোর্ট আনলক করা হচ্ছে...'
-              : 'আপনার Robi & Cirkle নম্বরটি ইতিমধ্যেই সক্রিয় রয়েছে। ড্যাশবোর্ডে নিয়ে যাওয়া হচ্ছে...'
-          );
+          setBdappsToast(PATH_A_WELCOME_TOAST);
+          setStatusMsg(PATH_A_WELCOME_TOAST);
+
           if (onSubscribed) {
             onSubscribed(session);
           } else {
-            navigate('/dashboard', { replace: true, state: { freshHandoff: true } });
+            navigate('/dashboard', {
+              replace: true,
+              state: { freshHandoff: true, welcomeToast: PATH_A_WELCOME_TOAST },
+            });
           }
           return;
         }
       } catch {
-        // If pre-check transiently fails, continue cleanly to send_otp.php
+        // If pre-check transiently fails, proceed cleanly to send_otp.php
       }
 
-      // 2. Request OTP: send_otp.php
+      // 2. Path B (Not Subscribed): Call send_otp.php and strictly enforce OTP verification
       const otpRes = await requestBdappsOtp(fullMobile);
 
-      // Handle E1351 (already registered) or active subscription payload directly
+      // Strict OTP enforcement: whenever referenceNo is returned (non-subscribed challenge),
+      // stay on this form and reveal the 6-digit OTP verification input box immediately.
+      if (isOtpChallengePayload(otpRes)) {
+        const ref = String(otpRes.referenceNo).trim();
+        setActiveMobile(fullMobile);
+        setReferenceNo(ref);
+        setOtpCode('');
+        setCooldown(30);
+        setStatusMsg('আপনার ফোনে পাঠানো ৬-ডিজিটের OTP কোডটি নিচে বসান');
+        savePendingOtp({
+          referenceNo: ref,
+          mobile: fullMobile,
+          sentAt: Date.now(),
+        });
+        setStep('otp');
+        return;
+      }
+
+      // Only bypass OTP if send_otp.php itself confirms E1351 / active without issuing an OTP challenge
       if (
-        String(otpRes.statusCode || '').toUpperCase() === 'E1351' ||
-        isActiveSubscriptionPayload(otpRes)
+        !otpRes.referenceNo &&
+        (String(otpRes.statusCode || '').toUpperCase() === 'E1351' ||
+          isActiveSubscriptionPayload(otpRes))
       ) {
         const session = buildActiveSessionFromResponse(
           fullMobile,
@@ -175,16 +231,18 @@ export function BdappsSubscriptionCard({
         );
         saveBdappsSession(session);
         clearPendingOtp();
+        setActiveSession(session);
         setStep('verified');
-        setStatusMsg(
-          onSubscribed
-            ? 'আপনার Robi & Cirkle সাবস্ক্রিপশন সক্রিয় আছে! স্টক বিশ্লেষণ আনলক করা হচ্ছে...'
-            : 'আপনার Robi & Cirkle সাবস্ক্রিপশন সক্রিয় আছে! ড্যাশবোর্ডে প্রবেশ করা হচ্ছে...'
-        );
+        setBdappsToast(PATH_A_WELCOME_TOAST);
+        setStatusMsg(PATH_A_WELCOME_TOAST);
+
         if (onSubscribed) {
           onSubscribed(session);
         } else {
-          navigate('/dashboard', { replace: true, state: { freshHandoff: true } });
+          navigate('/dashboard', {
+            replace: true,
+            state: { freshHandoff: true, welcomeToast: PATH_A_WELCOME_TOAST },
+          });
         }
         return;
       }
@@ -195,6 +253,7 @@ export function BdappsSubscriptionCard({
         setReferenceNo(ref);
         setOtpCode('');
         setCooldown(30);
+        setStatusMsg('আপনার ফোনে পাঠানো ৬-ডিজিটের OTP কোডটি নিচে বসান');
         savePendingOtp({
           referenceNo: ref,
           mobile: fullMobile,
@@ -231,8 +290,9 @@ export function BdappsSubscriptionCard({
       const otpRes = await requestBdappsOtp(activeMobile);
 
       if (
-        String(otpRes.statusCode || '').toUpperCase() === 'E1351' ||
-        isActiveSubscriptionPayload(otpRes)
+        !otpRes.referenceNo &&
+        (String(otpRes.statusCode || '').toUpperCase() === 'E1351' ||
+          isActiveSubscriptionPayload(otpRes))
       ) {
         const session = buildActiveSessionFromResponse(activeMobile, otpRes, 'send_otp', {
           consentAccepted: true,
@@ -240,10 +300,15 @@ export function BdappsSubscriptionCard({
         });
         saveBdappsSession(session);
         clearPendingOtp();
+        setActiveSession(session);
+        setBdappsToast(PATH_A_WELCOME_TOAST);
         if (onSubscribed) {
           onSubscribed(session);
         } else {
-          navigate('/dashboard', { replace: true, state: { freshHandoff: true } });
+          navigate('/dashboard', {
+            replace: true,
+            state: { freshHandoff: true, welcomeToast: PATH_A_WELCOME_TOAST },
+          });
         }
         return;
       }
@@ -312,17 +377,18 @@ export function BdappsSubscriptionCard({
         // Save session synchronously BEFORE immediate unmount-safe navigation/unlock
         saveBdappsSession(session);
         clearPendingOtp();
+        setActiveSession(session);
         setStep('verified');
-        setStatusMsg(
-          onSubscribed
-            ? 'ভেরিফিকেশন সফল হয়েছে! আপনার কাঙ্ক্ষিত স্টকের পূর্ণ AI বিশ্লেষণ আনলক করা হচ্ছে...'
-            : 'ভেরিফিকেশন সফল হয়েছে! আপনার প্রিমিয়াম ড্যাশবোর্ড আনলক করা হচ্ছে...'
-        );
+        setBdappsToast(PATH_B_WELCOME_TOAST);
+        setStatusMsg(PATH_B_WELCOME_TOAST);
 
         if (onSubscribed) {
           onSubscribed(session);
         } else {
-          navigate('/dashboard', { replace: true, state: { freshHandoff: true } });
+          navigate('/dashboard', {
+            replace: true,
+            state: { freshHandoff: true, welcomeToast: PATH_B_WELCOME_TOAST },
+          });
         }
         return;
       }
@@ -507,7 +573,7 @@ export function BdappsSubscriptionCard({
                 </>
               ) : (
                 <>
-                  <span>OTP চান</span>
+                  <span>OTP চান / সাবমিট করুন</span>
                   <ArrowRight className="w-4 h-4" />
                 </>
               )}
@@ -517,9 +583,9 @@ export function BdappsSubscriptionCard({
 
         {step === 'otp' && (
           <form onSubmit={handleVerifyOtp} className="space-y-4 w-full min-w-0" noValidate>
-            <div className="space-y-1">
+            <div className="space-y-1.5">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <h3 className="text-base font-bold text-slate-900">৬ ডিজিটের কোড বসান</h3>
+                <h3 className="text-base font-bold text-slate-900">৬ ডিজিটের OTP যাচাই করুন</h3>
                 <button
                   type="button"
                   onClick={handleResendOtp}
@@ -530,12 +596,12 @@ export function BdappsSubscriptionCard({
                   <span>{cooldown > 0 ? `আবার পাঠান (${cooldown}s)` : 'আবার পাঠান'}</span>
                 </button>
               </div>
-              <p className="text-xs text-slate-600">
-                পাঠানো হয়েছে{' '}
+              <p className="text-xs font-semibold text-blue-800 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 leading-relaxed">
+                আপনার ফোনে পাঠানো ৬-ডিজিটের OTP কোডটি নিচে বসান (
                 <strong className="font-mono-num text-slate-900">
                   {maskBdMobile(activeMobile)}
-                </strong>{' '}
-                নম্বরে
+                </strong>
+                )
               </p>
             </div>
 
@@ -613,18 +679,64 @@ export function BdappsSubscriptionCard({
         )}
 
         {step === 'verified' && (
-          <div className="py-5 text-center space-y-3">
-            <div className="w-12 h-12 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center mx-auto">
-              <CheckCircle2 className="w-7 h-7" />
+          <div className="py-3 space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="w-11 h-11 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+                <CheckCircle2 className="w-6 h-6" />
+              </div>
+              <div className="min-w-0">
+                <div className="text-base font-extrabold text-slate-900">
+                  সাবস্ক্রিপশন সক্রিয় রয়েছে!
+                </div>
+                <p className="text-xs text-slate-600 mt-0.5 leading-relaxed">
+                  {statusMsg ||
+                    'আপনার Robi & Cirkle সাবস্ক্রিপশন সক্রিয় আছে—সকল AI বিশ্লেষণ, প্রো চার্ট ও Strong Bullish Setup এখন সম্পূর্ণ আনলক।'}
+                </p>
+              </div>
             </div>
-            <div className="text-base font-bold text-slate-900">সাবস্ক্রিপশন ভেরিফাই সম্পন্ন!</div>
-            <p className="text-xs text-slate-600 leading-relaxed">
-              {statusMsg || 'আপনার প্রিমিয়াম ড্যাশবোর্ড আনলক করা হচ্ছে...'}
-            </p>
-            <div className="inline-flex items-center gap-1.5 text-xs font-semibold text-blue-700">
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              <span>ড্যাশবোর্ড লোড হচ্ছে...</span>
-            </div>
+
+            {activeSession && (
+              <div className="bg-white border border-slate-200 rounded-xl p-3.5 space-y-2 text-xs">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-slate-500">মোবাইল নম্বর</span>
+                  <span className="font-bold text-slate-900 font-mono-num">
+                    {maskBdMobile(activeSession.mobile)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-slate-500">সাবস্ক্রাইবার আইডি</span>
+                  <span className="font-semibold text-slate-700 font-mono-num">
+                    {maskSubscriberId(activeSession.subscriberId)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-slate-500">স্ট্যাটাস</span>
+                  <span className="inline-flex items-center gap-1 font-bold text-emerald-700">
+                    <ShieldCheck className="w-3.5 h-3.5" />
+                    <span>{normalizeSubscriptionStatus(activeSession.subscriptionStatus)}</span>
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {!embeddedInModal && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+                <Link
+                  to="/dashboard"
+                  className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold transition-colors whitespace-nowrap"
+                >
+                  <span>সাবস্ক্রাইবার ড্যাশবোর্ড</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </Link>
+                <Link
+                  to="/analyzer"
+                  className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-blue-700 hover:bg-blue-800 text-white text-xs font-bold transition-colors whitespace-nowrap"
+                >
+                  <BarChart3 className="w-3.5 h-3.5" />
+                  <span>AI অ্যানালাইজার খুলুন</span>
+                </Link>
+              </div>
+            )}
           </div>
         )}
       </div>

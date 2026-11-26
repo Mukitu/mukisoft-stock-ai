@@ -11,6 +11,7 @@ export const BDAPPS_API_BASE = (
 export const BDAPPS_SESSION_KEY = 'ms_bdapps_session';
 export const BDAPPS_PENDING_KEY = 'ms_bdapps_pending';
 export const BDAPPS_TOAST_KEY = 'ms_bdapps_toast';
+export const BDAPPS_SESSION_EVENT = 'ms-bdapps-session-updated';
 
 export const FRESH_GRACE_WINDOW_MS = 5 * 60 * 1000; // 5 minutes
 export const VERIFY_REDIRECT_GRACE_MS = 700; // 700ms handoff delay
@@ -112,6 +113,18 @@ export function isActiveSubscriptionPayload(data: BdappsApiResponse | null | und
     .toUpperCase();
   const isExplicitlyInactive =
     status === 'UNREGISTERED' || status === 'DEREGISTERED' || status === 'EXPIRED';
+  const hasReferenceNo = Boolean(data.referenceNo && String(data.referenceNo).trim().length > 0);
+
+  // An OTP challenge response carrying a referenceNo must NEVER bypass OTP verification
+  // unless BDApps explicitly indicates the user is already subscribed / E1351.
+  if (
+    hasReferenceNo &&
+    data.isSubscribed !== true &&
+    !isAuthenticatedStatus(status) &&
+    code !== 'E1351'
+  ) {
+    return false;
+  }
 
   return (
     data.isSubscribed === true ||
@@ -122,6 +135,16 @@ export function isActiveSubscriptionPayload(data: BdappsApiResponse | null | und
       !isExplicitlyInactive &&
       data.isSubscribed !== false)
   );
+}
+
+export function isOtpChallengePayload(data: BdappsApiResponse | null | undefined): boolean {
+  if (!data) return false;
+  const ref = String(data.referenceNo || '').trim();
+  if (!ref) return false;
+  const code = String(data.statusCode || '')
+    .trim()
+    .toUpperCase();
+  return code !== 'E1351' && data.isSubscribed !== true;
 }
 
 export function isUnregisteredPayload(data: BdappsApiResponse | null | undefined): boolean {
@@ -159,6 +182,7 @@ export function getBdappsSession(): BdappsSession | null {
 export function saveBdappsSession(session: BdappsSession): void {
   try {
     window.sessionStorage.setItem(BDAPPS_SESSION_KEY, JSON.stringify(session));
+    window.dispatchEvent(new CustomEvent(BDAPPS_SESSION_EVENT, { detail: session }));
   } catch {
     // Ignore storage quota errors
   }
@@ -168,6 +192,7 @@ export function clearBdappsSession(): void {
   try {
     window.sessionStorage.removeItem(BDAPPS_SESSION_KEY);
     window.sessionStorage.removeItem(BDAPPS_PENDING_KEY);
+    window.dispatchEvent(new CustomEvent(BDAPPS_SESSION_EVENT, { detail: null }));
   } catch {
     // Ignore
   }

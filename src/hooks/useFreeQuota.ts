@@ -10,7 +10,7 @@ import {
   syncQuotaState,
   type FreeQuotaState,
 } from '../services/quotaService';
-import { getBdappsSession, isSessionActive } from '../services/bdappsService';
+import { BDAPPS_SESSION_EVENT, getBdappsSession, isSessionActive } from '../services/bdappsService';
 
 export function useFreeQuota() {
   const [quota, setQuota] = useState<FreeQuotaState>(() => readStoredQuotaState());
@@ -40,7 +40,7 @@ export function useFreeQuota() {
     void refreshQuota();
   }, [refreshQuota]);
 
-  // Listen to cross-component quota updates (e.g., after /api/analyze returns or modal unlocks)
+  // Listen to cross-component quota & BDApps session updates
   useEffect(() => {
     const onUpdated = (evt: Event) => {
       const detail = (evt as CustomEvent<FreeQuotaState>).detail;
@@ -50,9 +50,16 @@ export function useFreeQuota() {
         hasTriggeredAutoResetRef.current = false;
       }
     };
+    const onSessionChanged = () => {
+      void refreshQuota();
+    };
     window.addEventListener(QUOTA_UPDATED_EVENT, onUpdated);
-    return () => window.removeEventListener(QUOTA_UPDATED_EVENT, onUpdated);
-  }, []);
+    window.addEventListener(BDAPPS_SESSION_EVENT, onSessionChanged);
+    return () => {
+      window.removeEventListener(QUOTA_UPDATED_EVENT, onUpdated);
+      window.removeEventListener(BDAPPS_SESSION_EVENT, onSessionChanged);
+    };
+  }, [refreshQuota]);
 
   // Live 1-second ticking Bangla countdown timer
   useEffect(() => {

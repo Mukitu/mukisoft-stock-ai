@@ -612,7 +612,7 @@ export function HomePage() {
       </section>
       {/* Tamper-Proof 24-Hour Free Quota Paywall Modal */}
       <FreeQuotaPaywallModal
-        isOpen={paywallOpen}
+        isOpen={!isSubscribed && paywallOpen}
         resetInSeconds={liveResetSeconds}
         requestedSymbol={pendingSearch?.symbol}
         onClose={() => setPaywallOpen(false)}

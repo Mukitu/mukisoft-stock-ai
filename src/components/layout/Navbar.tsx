@@ -1,7 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, NavLink, useLocation } from 'react-router-dom';
 import { Menu, X } from 'lucide-react';
-import { getBdappsSession, isSessionActive } from '../../services/bdappsService';
+import {
+  BDAPPS_SESSION_EVENT,
+  getBdappsSession,
+  isSessionActive,
+} from '../../services/bdappsService';
 
 const PRIMARY_LINKS = [
   { to: '/', label: 'হোম' },
@@ -13,9 +17,17 @@ const PRIMARY_LINKS = [
 
 export function Navbar() {
   const [mobileOpen, setMobileOpen] = useState(false);
-  // Subscribe to route transitions so active BDApps session state reflects immediately
-  useLocation();
-  const hasActiveSubscription = isSessionActive(getBdappsSession());
+  const location = useLocation();
+  const [hasActiveSubscription, setHasActiveSubscription] = useState(() =>
+    isSessionActive(getBdappsSession())
+  );
+
+  useEffect(() => {
+    const syncStatus = () => setHasActiveSubscription(isSessionActive(getBdappsSession()));
+    syncStatus();
+    window.addEventListener(BDAPPS_SESSION_EVENT, syncStatus);
+    return () => window.removeEventListener(BDAPPS_SESSION_EVENT, syncStatus);
+  }, [location.pathname]);
 
   return (
     <header className="sticky top-0 z-40 w-full max-w-full bg-white/95 backdrop-blur-md border-b border-slate-200">
