@@ -4,9 +4,11 @@ import {
   Activity,
   AlertTriangle,
   ArrowRight,
+  Banknote,
   BarChart3,
   CheckCircle2,
   Clock,
+  Fingerprint,
   Loader2,
   RefreshCw,
   ShieldCheck,
@@ -41,7 +43,7 @@ import { useTopPicks } from '../hooks/useMarketQueries';
 import { LIVE_FEED_WAITING_BN } from '../services/apiClient';
 import { SelfRiskDisclaimerBanner } from '../components/common/SelfRiskDisclaimerBanner';
 import {
-  formatStrongBuyConsensusLine,
+  toBanglaDigits,
 } from '../utils/quantConsensus';
 
 interface DashboardLocationState {
@@ -291,74 +293,96 @@ export function DashboardPage() {
       )}
 
       {/* Subscriber Status & Profile Card + Quick AI Tools Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Left: Status & Profile Card */}
-        <section className="lg:col-span-5 bg-white border border-slate-200 rounded-2xl p-6 flex flex-col justify-between space-y-6">
-          <div className="space-y-5">
-            <div className="flex items-start justify-between gap-3 pb-4 border-b border-slate-100">
-              <div className="flex items-center gap-3">
-                <div className="w-11 h-11 rounded-xl bg-blue-50 border border-blue-100 text-blue-700 flex items-center justify-center shrink-0">
-                  <Smartphone className="w-5 h-5" />
-                </div>
-                <div>
-                  <div className="text-xs font-semibold text-slate-500">Robi &amp; Cirkle সাবস্ক্রাইবার</div>
-                  <div className="text-lg font-bold text-slate-900 font-mono-num">
-                    {maskBdMobile(session.mobile)}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        {/* Left: Executive Subscriber Membership Card */}
+        <section className="lg:col-span-5 bg-white border border-slate-200 rounded-2xl shadow-xs overflow-hidden flex flex-col justify-between">
+          <div>
+            {/* Top Header Block with Subtle Slate/Emerald Gradient Accent */}
+            <div className="bg-gradient-to-br from-slate-50 via-white to-emerald-50/80 border-b border-slate-200/80 px-6 py-5 space-y-3.5">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3.5 min-w-0">
+                  <div className="w-11 h-11 rounded-xl bg-slate-900 text-emerald-400 shadow-xs flex items-center justify-center shrink-0">
+                    <Smartphone className="w-5 h-5" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                      Robi &amp; Cirkle সাবস্ক্রাইবার
+                    </div>
+                    <div className="text-lg sm:text-xl font-extrabold text-slate-900 font-mono-num tabular-nums tracking-tight mt-0.5 truncate">
+                      {maskBdMobile(session.mobile)}
+                    </div>
                   </div>
                 </div>
               </div>
 
-              <span
-                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-bold tracking-wide border ${
-                  isPendingCharge
-                    ? 'bg-amber-50 text-amber-800 border-amber-200'
-                    : 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                }`}
-              >
-                <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
-                <span>{normalizedStatus}</span>
-              </span>
+              <div className="flex items-center justify-between gap-2 pt-0.5">
+                <span className="text-[11px] font-medium text-slate-500">সদস্যপদ অবস্থা</span>
+                <span
+                  className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold tracking-wide border whitespace-nowrap shrink-0 ${
+                    isPendingCharge
+                      ? 'bg-amber-50 text-amber-800 border-amber-200/90'
+                      : 'bg-emerald-50 text-emerald-800 border-emerald-200/90'
+                  }`}
+                >
+                  <span
+                    className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                      isPendingCharge ? 'bg-amber-500' : 'bg-emerald-500'
+                    }`}
+                  />
+                  <span>{normalizedStatus}</span>
+                </span>
+              </div>
             </div>
 
-            <dl className="grid grid-cols-1 gap-3.5 text-sm">
-              <div className="flex items-center justify-between gap-3 bg-slate-50 border border-slate-200/80 rounded-xl px-4 py-3">
-                <dt className="text-xs font-medium text-slate-500">সাবস্ক্রাইবার আইডি (Masked)</dt>
-                <dd className="text-xs font-bold text-slate-900 font-mono-num">
-                  {maskSubscriberId(session.subscriberId)}
-                </dd>
-              </div>
-
-              <div className="flex items-center justify-between gap-3 bg-slate-50 border border-slate-200/80 rounded-xl px-4 py-3">
-                <dt className="text-xs font-medium text-slate-500">চার্জ রেট</dt>
-                <dd className="text-xs font-bold text-slate-900">
-                  ২.৭৮ টাকা /দিন <span className="font-normal text-slate-500">(ভ্যাট + এসডি + এসসি সহ)</span>
-                </dd>
-              </div>
-
-              <div className="flex items-center justify-between gap-3 bg-slate-50 border border-slate-200/80 rounded-xl px-4 py-3">
-                <dt className="text-xs font-medium text-slate-500 flex items-center gap-1.5">
-                  <Clock className="w-3.5 h-3.5 text-slate-400" />
-                  <span>ভেরিফাই সময় (BST)</span>
-                </dt>
-                <dd className="text-xs font-semibold text-slate-800">
-                  {formatVerifiedTimestamp(session.verifiedAt)}
-                </dd>
-              </div>
-
-              <div className="flex flex-col gap-1.5 bg-emerald-50/70 border border-emerald-200 rounded-xl px-4 py-3">
-                <div className="flex items-center justify-between gap-2">
-                  <dt className="text-xs font-semibold text-emerald-950">Legal Risk Consent</dt>
-                  <dd className="inline-flex items-center gap-1 text-xs font-bold text-emerald-800">
-                    <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
-                    <span>
-                      {session.consentAccepted !== false
-                        ? 'Agreed (I Agree)'
-                        : 'Pending'}
-                    </span>
+            {/* Structured Metadata Rows */}
+            <div className="p-6 space-y-4">
+              <dl className="divide-y divide-slate-100 rounded-xl border border-slate-200/90 bg-slate-50/50">
+                <div className="flex items-center justify-between gap-4 px-4 py-3.5">
+                  <dt className="text-xs font-medium text-slate-500 flex items-center gap-2">
+                    <Fingerprint className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                    <span>সাবস্ক্রাইবার আইডি (Masked)</span>
+                  </dt>
+                  <dd className="text-xs font-bold text-slate-900 font-mono-num tabular-nums text-right">
+                    {maskSubscriberId(session.subscriberId)}
                   </dd>
                 </div>
-                <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-emerald-900/80">
-                  <span>
+
+                <div className="flex items-center justify-between gap-4 px-4 py-3.5">
+                  <dt className="text-xs font-medium text-slate-500 flex items-center gap-2 shrink-0">
+                    <Banknote className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                    <span>চার্জ রেট</span>
+                  </dt>
+                  <dd className="text-xs font-bold text-slate-900 text-right tabular-nums">
+                    ২.৭৮ টাকা /দিন{' '}
+                    <span className="font-normal text-slate-500">(ভ্যাট + এসডি + এসসি সহ)</span>
+                  </dd>
+                </div>
+
+                <div className="flex items-center justify-between gap-4 px-4 py-3.5">
+                  <dt className="text-xs font-medium text-slate-500 flex items-center gap-2 shrink-0">
+                    <Clock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                    <span>ভেরিফাই সময় (BST)</span>
+                  </dt>
+                  <dd className="text-xs font-semibold text-slate-800 text-right tabular-nums">
+                    {formatVerifiedTimestamp(session.verifiedAt)}
+                  </dd>
+                </div>
+              </dl>
+
+              {/* Refined Legal Risk Consent Card */}
+              <div className="rounded-xl border border-emerald-200/90 bg-emerald-50/60 px-4 py-3.5 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-950">
+                    <ShieldCheck className="w-4 h-4 text-emerald-700 shrink-0" />
+                    <span>Legal Risk Consent</span>
+                  </div>
+                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100/90 border border-emerald-200 px-2.5 py-0.5 text-[11px] font-bold text-emerald-800 whitespace-nowrap">
+                    <CheckCircle2 className="w-3 h-3 shrink-0" />
+                    <span>{session.consentAccepted !== false ? 'Agreed (I Agree)' : 'Pending'}</span>
+                  </span>
+                </div>
+                <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5 text-[11px] text-emerald-900/80">
+                  <span className="tabular-nums">
                     সম্মতির সময়:{' '}
                     {session.consentTimestamp
                       ? formatVerifiedTimestamp(Date.parse(session.consentTimestamp) || session.verifiedAt)
@@ -368,29 +392,29 @@ export function DashboardPage() {
                     to="/risk-disclosure"
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="font-semibold text-blue-700 underline underline-offset-2 hover:text-blue-800"
+                    className="font-semibold text-blue-700 underline underline-offset-2 hover:text-blue-800 whitespace-nowrap"
                   >
                     বিনিয়োগ ঝুঁকি ও নীতিমালা
                   </Link>
                 </div>
               </div>
-            </dl>
+            </div>
           </div>
 
           {/* One-Click Unsubscribe Control */}
-          <div className="pt-4 border-t border-slate-200 space-y-2.5">
+          <div className="px-6 py-5 bg-slate-50/70 border-t border-slate-200/80 space-y-2.5">
             <button
               type="button"
               onClick={() => {
                 setUnsubError(null);
                 setShowUnsubModal(true);
               }}
-              className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs sm:text-sm font-bold transition-colors cursor-pointer"
+              className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-white hover:bg-rose-600 text-rose-700 hover:text-white border border-rose-300 hover:border-rose-600 text-xs sm:text-sm font-bold shadow-2xs transition-colors cursor-pointer"
             >
               <Trash2 className="w-4 h-4 shrink-0" />
               <span>সাবস্ক্রিপশন বাতিল করুন (One-Click Unsubscribe)</span>
             </button>
-            <p className="text-[11px] text-slate-500 text-center">
+            <p className="text-[11px] text-slate-500 text-center leading-relaxed">
               বাতিল করলে আপনার Robi &amp; Cirkle নম্বর থেকে পরবর্তী দৈনিক চার্জ সাথে সাথে বন্ধ হয়ে যাবে।
             </p>
           </div>
@@ -401,14 +425,14 @@ export function DashboardPage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Link
               to="/analyzer"
-              className="group bg-white border border-slate-200 hover:border-blue-600/60 rounded-2xl p-6 flex flex-col justify-between space-y-4 transition-colors"
+              className="group bg-white border border-slate-200 hover:border-blue-600/60 rounded-2xl p-6 shadow-xs flex flex-col justify-between space-y-4 transition-all"
             >
               <div className="space-y-3">
-                <div className="w-11 h-11 rounded-xl bg-blue-50 text-blue-700 flex items-center justify-center">
+                <div className="w-11 h-11 rounded-xl bg-blue-50 border border-blue-100 text-blue-700 flex items-center justify-center">
                   <BarChart3 className="w-5 h-5" />
                 </div>
                 <div>
-                  <h2 className="text-lg font-bold text-slate-900 group-hover:text-blue-700 transition-colors">
+                  <h2 className="text-base sm:text-lg font-bold text-slate-900 group-hover:text-blue-700 transition-colors">
                     ২০-ইন্ডিকেটর AI স্টক অ্যানালাইজার
                   </h2>
                   <p className="text-xs text-slate-600 mt-1.5 leading-relaxed">
@@ -424,14 +448,14 @@ export function DashboardPage() {
 
             <Link
               to="/market"
-              className="group bg-white border border-slate-200 hover:border-emerald-600/60 rounded-2xl p-6 flex flex-col justify-between space-y-4 transition-colors"
+              className="group bg-white border border-slate-200 hover:border-emerald-600/60 rounded-2xl p-6 shadow-xs flex flex-col justify-between space-y-4 transition-all"
             >
               <div className="space-y-3">
-                <div className="w-11 h-11 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center">
+                <div className="w-11 h-11 rounded-xl bg-emerald-50 border border-emerald-100 text-emerald-700 flex items-center justify-center">
                   <TrendingUp className="w-5 h-5" />
                 </div>
                 <div>
-                  <h2 className="text-lg font-bold text-slate-900 group-hover:text-emerald-700 transition-colors">
+                  <h2 className="text-base sm:text-lg font-bold text-slate-900 group-hover:text-emerald-700 transition-colors">
                     ট্রেডিংভিউ প্রো চার্ট টার্মিনাল
                   </h2>
                   <p className="text-xs text-slate-600 mt-1.5 leading-relaxed">
@@ -447,46 +471,104 @@ export function DashboardPage() {
           </div>
 
           {/* Live Daily Strong Bullish Setup Radar Shortcuts */}
-          <section className="bg-white border border-slate-200 rounded-2xl p-6 space-y-4 flex-1">
-            <div className="flex items-center justify-between gap-2 pb-3 border-b border-slate-100">
+          <section className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-4 flex-1">
+            <div className="flex flex-wrap items-center justify-between gap-2 pb-3.5 border-b border-slate-100">
               <div className="flex items-center gap-2">
-                <Activity className="w-4 h-4 text-emerald-700" />
-                <h2 className="text-sm font-bold text-slate-900">
+                <div className="w-7 h-7 rounded-lg bg-emerald-50 border border-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+                  <Activity className="w-4 h-4" />
+                </div>
+                <h2 className="text-sm sm:text-base font-bold text-slate-900">
                   আজকের Strong Bullish Setup পর্যবেক্ষণ শর্টকাট
                 </h2>
               </div>
-              <span className="text-[11px] font-semibold text-slate-500">
-                {picksData?.generated_at_bst || '৩:০০ PM BST'}
+              <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-slate-500 bg-slate-100 px-2.5 py-1 rounded-md tabular-nums">
+                <Clock className="w-3 h-3 text-slate-400" />
+                <span>{picksData?.generated_at_bst || '৩:০০ PM BST'}</span>
               </span>
             </div>
 
             <SelfRiskDisclaimerBanner />
 
             {picks.length > 0 ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                {picks.slice(0, 6).map((pick) => (
-                  <Link
-                    key={pick.symbol}
-                    to={`/analyzer?symbol=${encodeURIComponent(pick.symbol)}&exchange=${pick.exchange}&pick=buy`}
-                    className="border border-slate-200 hover:border-blue-600/60 bg-slate-50/70 hover:bg-white rounded-xl p-3.5 transition-colors space-y-1.5"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-sm font-bold text-slate-900">{pick.symbol}</span>
-                      <span className="text-[11px] text-slate-500 font-mono-num">
-                        কনফিডেন্স {pick.confidence.toFixed(1)}%
-                      </span>
-                    </div>
-                    <div className="text-[11px] font-semibold text-emerald-800 leading-snug">
-                      {formatStrongBuyConsensusLine(pick.bull_votes)}
-                    </div>
-                    <div className="flex items-center justify-between text-xs font-mono-num text-slate-600">
-                      <span>৳{pick.price.toFixed(2)}</span>
-                      <span className="text-emerald-700 font-semibold">
-                        রেফারেন্স টার্গেট ৳{pick.target_price.toFixed(2)}
-                      </span>
-                    </div>
-                  </Link>
-                ))}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {picks.slice(0, 6).map((pick) => {
+                  const totalVotes = pick.total_votes || 20;
+                  const votePct = Math.min(100, Math.max(0, (pick.bull_votes / totalVotes) * 100));
+                  const upsidePct =
+                    pick.price > 0 ? ((pick.target_price - pick.price) / pick.price) * 100 : 0;
+
+                  return (
+                    <Link
+                      key={pick.symbol}
+                      to={`/analyzer?symbol=${encodeURIComponent(pick.symbol)}&exchange=${pick.exchange}&pick=buy`}
+                      className="group flex flex-col justify-between border border-slate-200 hover:border-blue-600/60 bg-white hover:bg-slate-50/40 rounded-2xl p-4 shadow-2xs transition-all space-y-3.5"
+                    >
+                      {/* Card Header */}
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="text-base font-extrabold text-slate-900 tracking-tight truncate">
+                            {pick.symbol}
+                          </span>
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider bg-slate-100 text-slate-600 border border-slate-200 shrink-0">
+                            {pick.exchange}
+                          </span>
+                        </div>
+                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200/80 font-mono-num tabular-nums whitespace-nowrap shrink-0">
+                          কনফিডেন্স {toBanglaDigits(pick.confidence.toFixed(1))}%
+                        </span>
+                      </div>
+
+                      {/* Consensus Indicator Pill + Visual Progress Bar */}
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between gap-2 text-[11px]">
+                          <span className="inline-flex items-center gap-1.5 font-semibold text-emerald-800">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
+                            <span>
+                              {toBanglaDigits(pick.bull_votes)}/{toBanglaDigits(totalVotes)} বুলিশ সূচক
+                            </span>
+                          </span>
+                          <span className="text-slate-500 font-medium tabular-nums">
+                            {toBanglaDigits(Math.round(votePct))}% ঐকমত্য
+                          </span>
+                        </div>
+                        <div className="h-1.5 w-full rounded-full bg-slate-100 overflow-hidden">
+                          <div
+                            className="h-full rounded-full bg-emerald-600 transition-all"
+                            style={{ width: `${votePct}%` }}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Price vs Reference Target Box */}
+                      <div className="grid grid-cols-2 gap-3 rounded-xl bg-slate-50 border border-slate-200/80 p-3 font-mono-num tabular-nums">
+                        <div>
+                          <div className="text-[10px] font-semibold text-slate-500">বর্তমান দর</div>
+                          <div className="text-sm font-bold text-slate-900 mt-0.5">
+                            ৳ {pick.price.toFixed(2)}
+                          </div>
+                        </div>
+                        <div className="border-l border-slate-200/80 pl-3">
+                          <div className="text-[10px] font-semibold text-slate-500">রেফারেন্স টার্গেট</div>
+                          <div className="flex flex-wrap items-baseline gap-1.5 mt-0.5">
+                            <span className="text-sm font-bold text-emerald-700">
+                              ৳ {pick.target_price.toFixed(2)}
+                            </span>
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100/80 text-emerald-800">
+                              {upsidePct >= 0 ? '+' : ''}
+                              {upsidePct.toFixed(2)}%
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Footer Link */}
+                      <div className="flex items-center justify-between pt-0.5 text-xs font-semibold text-blue-700 group-hover:text-blue-800">
+                        <span>বিস্তারিত বিশ্লেষণ দেখুন</span>
+                        <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
+                      </div>
+                    </Link>
+                  );
+                })}
               </div>
             ) : (
               <p className="text-xs text-slate-600 leading-relaxed">
