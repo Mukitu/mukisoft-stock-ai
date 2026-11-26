@@ -75,9 +75,12 @@ MAX_FILE_BYTES = 5 * 1024 * 1024  # 5 MB per file
 ALLOWED_MIME_TYPES = {"application/pdf", "image/png", "image/jpeg", "image/webp"}
 HTTP_HEADERS = {
     "User-Agent": (
-        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
         "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
-    )
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,application/json;q=0.8,*/*;q=0.7",
+    "Accept-Language": "en-US,en;q=0.9,bn;q=0.8",
+    "Referer": "https://www.dsebd.org/",
 }
 
 SECTOR_CATALOG: dict[str, list[str]] = {
@@ -398,7 +401,7 @@ async def call_groq_chat(messages: list[dict[str, Any]], max_tokens: int = 340, 
                     "temperature": temperature,
                     "max_tokens": max_tokens,
                 },
-                timeout=14.0,
+                timeout=5.0,
             )
             if resp.status_code == 429:
                 last_err = f"Rate limited on {model_name}"
@@ -700,15 +703,58 @@ def _fetch_bdshare_board_sync() -> pd.DataFrame | None:
 
 
 async def scrape_dse_latest_board() -> pd.DataFrame | None:
-    """Dynamically scrapes DSE's official latest share price board (works 24/7 including off-market)."""
+    """
+    Dynamically scrapes DSE's official latest share price board (works 24/7 including off-market).
+    Supports both the new Next.js dsebd.org SSR ticker JSON and legacy HTML table fallback.
+    """
     if _http_client is None:
         return None
+
+    # 1. Primary fast SSR ticker tape from https://www.dsebd.org/ (<1s, valid TLS)
+    home_url = "https://www.dsebd.org/"
+    if _is_allowlisted_exchange_url(home_url):
+        try:
+            resp = await _http_client.get(home_url, headers=HTTP_HEADERS, timeout=6.0)
+            if resp.status_code == 200 and resp.text:
+                unesc = resp.text.replace('\\"', '"')
+                matches = re.findall(
+                    r'"code":"([A-Z0-9&().-]{1,20})","price":"([0-9.,]+)","change":([-0-9.]+),"delta":([-0-9.]+)',
+                    unesc,
+                )
+                rows_new: list[dict[str, Any]] = []
+                seen_syms: set[str] = set()
+                for sym, price_s, _chg_s, delta_s in matches:
+                    clean_sym = sym.strip().upper()
+                    if clean_sym in seen_syms or not SYMBOL_REGEX.match(clean_sym):
+                        continue
+                    price = _parse_float(price_s)
+                    if price <= 0:
+                        continue
+                    delta = _parse_float(delta_s)
+                    ycp = round(price - delta, 2) if (price - delta) > 0 else price
+                    seen_syms.add(clean_sym)
+                    rows_new.append({
+                        "symbol": clean_sym,
+                        "ltp": price,
+                        "high": max(price, ycp),
+                        "low": min(price, ycp),
+                        "close": price,
+                        "ycp": ycp,
+                        "value": 0.0,
+                        "volume": 0.0,
+                    })
+                if len(rows_new) >= 50:
+                    return pd.DataFrame(rows_new)
+        except Exception as exc:
+            logger.debug("DSE homepage SSR ticker board scrape failed: %s", exc)
+
+    # 2. Legacy table fallback
     url = "https://www.dsebd.org/latest_share_price_scroll_l.php"
     if not _is_allowlisted_exchange_url(url):
         return None
 
     try:
-        resp = await _http_client.get(url, headers=HTTP_HEADERS, timeout=12.0)
+        resp = await _http_client.get(url, headers=HTTP_HEADERS, timeout=6.0)
         if resp.status_code != 200 or not resp.text:
             return None
         soup = BeautifulSoup(resp.text, "html.parser")
@@ -719,8 +765,6 @@ async def scrape_dse_latest_board() -> pd.DataFrame | None:
                 cells = [td.get_text(" ", strip=True) for td in tr.find_all("td")]
                 if len(cells) < 10:
                     continue
-                # Standard DSE latest_share_price_scroll_l columns:
-                # [0]=#, [1]=TRADING CODE, [2]=LTP, [3]=HIGH, [4]=LOW, [5]=CLOSEP, [6]=YCP, [7]=CHANGE, [8]=TRADE, [9]=VALUE, [10]=VOLUME
                 sym = cells[1].strip().upper()
                 if not SYMBOL_REGEX.match(sym):
                     continue
@@ -752,7 +796,7 @@ async def scrape_dse_latest_board() -> pd.DataFrame | None:
 
 
 async def get_dynamic_dse_board() -> pd.DataFrame | None:
-    """Returns live or latest closing DSE market board dynamically (bdshare -> dsebd.org fallback)."""
+    """Returns live or latest closing DSE market board dynamically (parallel bdshare + dsebd.org)."""
     cached = cache_get("dse_board_df")
     if cached is not None:
         return cached
@@ -760,14 +804,23 @@ async def get_dynamic_dse_board() -> pd.DataFrame | None:
     session = get_bd_market_session()
     ttl = 90 if session["is_live"] else 600
 
-    board_df: pd.DataFrame | None = None
-    try:
-        board_df = await asyncio.wait_for(asyncio.to_thread(_fetch_bdshare_board_sync), timeout=8.0)
-    except Exception:
-        board_df = None
+    async def _bdshare_board_task() -> pd.DataFrame | None:
+        try:
+            return await asyncio.wait_for(asyncio.to_thread(_fetch_bdshare_board_sync), timeout=5.5)
+        except Exception:
+            return None
 
-    if board_df is None or len(board_df) == 0:
-        board_df = await scrape_dse_latest_board()
+    bd_df, scraped_df = await asyncio.gather(
+        _bdshare_board_task(),
+        scrape_dse_latest_board(),
+        return_exceptions=True,
+    )
+
+    board_df: pd.DataFrame | None = None
+    if isinstance(bd_df, pd.DataFrame) and len(bd_df) > 0:
+        board_df = bd_df
+    elif isinstance(scraped_df, pd.DataFrame) and len(scraped_df) > 0:
+        board_df = scraped_df
 
     if board_df is not None and len(board_df) > 0:
         cache_set("dse_board_df", board_df, ttl_seconds=ttl)
@@ -808,7 +861,7 @@ def _extract_quote_from_board(board_df: pd.DataFrame | None, symbol: str) -> dic
 async def scrape_dse_day_end_archive(symbol: str) -> pd.DataFrame | None:
     """
     Dynamically scrapes DSE's official Day End Archive table for ANY listed DSE ticker.
-    Works 24/7 including after 2:30 PM and Friday/Saturday weekends.
+    Bounded to 6.0s timeout so slow/deprecated endpoints never stall /api/analyze.
     """
     if _http_client is None:
         return None
@@ -824,7 +877,7 @@ async def scrape_dse_day_end_archive(symbol: str) -> pd.DataFrame | None:
         return None
 
     try:
-        resp = await _http_client.get(url, headers=HTTP_HEADERS, timeout=14.0)
+        resp = await _http_client.get(url, headers=HTTP_HEADERS, timeout=6.0)
         if resp.status_code != 200 or not resp.text:
             return None
         soup = BeautifulSoup(resp.text, "html.parser")
@@ -834,7 +887,6 @@ async def scrape_dse_day_end_archive(symbol: str) -> pd.DataFrame | None:
             cells = [td.get_text(" ", strip=True) for td in tr.find_all("td")]
             if len(cells) < 11:
                 continue
-            # Columns: [0]=#, [1]=DATE, [2]=TRADING CODE, [3]=LTP, [4]=HIGH, [5]=LOW, [6]=OPENP, [7]=CLOSEP, [8]=YCP, [9]=TRADE, [10]=VALUE, [11]=VOLUME
             code = cells[2].strip().upper()
             if code != symbol:
                 continue
@@ -874,7 +926,7 @@ async def scrape_dse_day_end_archive(symbol: str) -> pd.DataFrame | None:
 
 
 async def scrape_cse_current_board_quote(symbol: str) -> dict[str, Any] | None:
-    """Dynamically scrapes CSE current price table for any CSE ticker."""
+    """Dynamically scrapes CSE current price table for any CSE ticker (timeout=6s)."""
     if _http_client is None:
         return None
     cached_cse = cache_get("cse_board_map")
@@ -886,7 +938,7 @@ async def scrape_cse_current_board_quote(symbol: str) -> dict[str, Any] | None:
         return None
 
     try:
-        resp = await _http_client.get(url, headers=HTTP_HEADERS, timeout=12.0)
+        resp = await _http_client.get(url, headers=HTTP_HEADERS, timeout=6.0)
         if resp.status_code != 200 or not resp.text:
             return None
         soup = BeautifulSoup(resp.text, "html.parser")
@@ -895,7 +947,6 @@ async def scrape_cse_current_board_quote(symbol: str) -> dict[str, Any] | None:
             cells = [td.get_text(" ", strip=True) for td in tr.find_all("td")]
             if len(cells) < 8:
                 continue
-            # CSE current_price columns typically: [0]=SL, [1]=Scrip, [2]=LTP, [3]=Open, [4]=High, [5]=Low, [6]=YCP, [7]=Trade, [8]=Value, [9]=Volume
             sym = cells[1].strip().upper()
             if not SYMBOL_REGEX.match(sym):
                 continue
@@ -924,15 +975,81 @@ async def scrape_cse_current_board_quote(symbol: str) -> dict[str, Any] | None:
     return None
 
 
+async def scrape_new_dse_company_quote(symbol: str) -> tuple[dict[str, Any], str] | None:
+    """
+    Dynamically scrapes latest live/closing quote from DSE's new SSR company page
+    https://www.dsebd.org/company/{SYMBOL} (<1s response, valid TLS, works 24/7).
+    """
+    if _http_client is None:
+        return None
+    url = f"https://www.dsebd.org/company/{quote(symbol, safe='')}"
+    if not _is_allowlisted_exchange_url(url):
+        return None
+
+    try:
+        resp = await _http_client.get(url, headers=HTTP_HEADERS, timeout=6.0)
+        if resp.status_code != 200 or not resp.text:
+            return None
+        unesc = resp.text.replace('\\"', '"')
+
+        def _json_num(pattern: str) -> float:
+            m = re.search(pattern, unesc)
+            return _parse_float(m.group(1)) if m else 0.0
+
+        last_price = _json_num(r'"lastPrice":([0-9.]+)')
+        close_p = _json_num(r'"close":([0-9.]+),"trades"') or _json_num(r'"close":([0-9.]+)')
+        prev_close = _json_num(r'"prevClose":([0-9.]+)')
+        open_p = _json_num(r'"open":([0-9.]+),"high"') or _json_num(r'"open":([0-9.]+)')
+        high_p = _json_num(r'"open":[0-9.]+,"high":([0-9.]+)') or _json_num(r'"high":([0-9.]+)')
+        low_p = _json_num(r'"high":[0-9.]+,"low":([0-9.]+)') or _json_num(r'"low":([0-9.]+)')
+        vol = _json_num(r'"volume":([0-9.]+),"trades"') or _json_num(r'"volume":([0-9.]+)')
+
+        final_close = last_price if last_price > 0 else (close_p if close_p > 0 else prev_close)
+        if final_close <= 0:
+            return None
+
+        ycp = prev_close if prev_close > 0 else (open_p if open_p > 0 else final_close)
+        final_open = open_p if open_p > 0 else ycp
+        final_high = max(high_p, final_open, final_close)
+        final_low = min(low_p, final_open, final_close) if low_p > 0 else min(final_open, final_close)
+
+        date_m = re.search(r'"marketLastUpdate":"(\d{4}-\d{2}-\d{2})', unesc)
+        quote_date = date_m.group(1) if date_m else get_bst_now().date().isoformat()
+
+        logger.info("New DSE SSR company page succeeded for %s (close=%.2f, vol=%.0f)", symbol, final_close, vol)
+        return (
+            {
+                "date": quote_date,
+                "open": final_open,
+                "high": final_high,
+                "low": final_low,
+                "close": final_close,
+                "ycp": ycp,
+                "volume": vol,
+            },
+            "Official DSE Live/Closing Company Feed",
+        )
+    except Exception as exc:
+        logger.debug("New DSE SSR company scrape failed for %s: %s", symbol, exc)
+    return None
+
+
 async def scrape_direct_exchange_quote(symbol: str, exchange: str) -> tuple[dict[str, Any], str] | None:
     """
-    Dynamically scrapes latest live/closing quote directly from dsebd.org displayCompany
-    and cse.com.bd companydetails pages (works 24/7 including after 2:30 PM & weekends).
+    Dynamically scrapes latest live/closing quote directly from DSE (/company/{SYMBOL} + legacy
+    displayCompany.php) and CSE (companydetails + current_price) with strict 6s timeouts.
     """
     if _http_client is None:
         return None
 
     encoded_sym = quote(symbol, safe="")
+
+    # Fast primary for DSE: new SSR company page (returns in <1s)
+    if exchange == "DSE":
+        new_dse = await scrape_new_dse_company_quote(symbol)
+        if new_dse:
+            return new_dse
+
     dse_url = f"https://www.dsebd.org/displayCompany.php?name={encoded_sym}"
     cse_url = f"https://www.cse.com.bd/company/companydetails/{encoded_sym}"
 
@@ -946,7 +1063,7 @@ async def scrape_direct_exchange_quote(symbol: str, exchange: str) -> tuple[dict
         if not _is_allowlisted_exchange_url(url):
             continue
         try:
-            resp = await _http_client.get(url, headers=HTTP_HEADERS, timeout=11.0)
+            resp = await _http_client.get(url, headers=HTTP_HEADERS, timeout=6.0)
             if resp.status_code != 200 or not resp.text:
                 continue
             if symbol not in resp.text.upper():
@@ -1017,9 +1134,15 @@ async def scrape_direct_exchange_quote(symbol: str, exchange: str) -> tuple[dict
             logger.debug("Direct %s scrape failed for %s: %s", exch_name, symbol, exc)
 
     if exchange == "CSE":
-        cse_quote = await scrape_cse_current_board_quote(symbol)
-        if cse_quote:
+        cse_quote, new_dse_fallback = await asyncio.gather(
+            scrape_cse_current_board_quote(symbol),
+            scrape_new_dse_company_quote(symbol),
+            return_exceptions=True,
+        )
+        if isinstance(cse_quote, dict):
             return cse_quote, "Official CSE Live/Closing Market Feed"
+        if isinstance(new_dse_fallback, tuple):
+            return new_dse_fallback
 
     return None
 
@@ -1029,12 +1152,10 @@ async def fetch_dynamic_ohlcv_for_symbol(
     exchange: str,
 ) -> tuple[pd.DataFrame, str] | None:
     """
-    100% Dynamic 24/7 Multi-Source OHLCV Pipeline for ANY valid DSE or CSE symbol:
-      1. Primary: bdshare 120D historical OHLCV + latest board quote
-      2. Mandatory Fallback 1: Official dsebd.org day_end_archive.php (full historical OHLCV 24/7)
-      3. Mandatory Fallback 2: Official dsebd.org/displayCompany.php, cse.com.bd/company/companydetails,
-         and latest_share_price_scroll_l.php live/closing quotes merged with historical depth
-      4. Mandatory Fallback 3: Server-side symbol_ohlcv_cache/ real persisted history
+    100% Dynamic 24/7 Parallel Multi-Source OHLCV Pipeline (strict 6s timeouts):
+      - Phase 1 (Parallel): bdshare 120D OHLCV + Direct DSE/CSE live/closing quote + DSE board
+      - Phase 2 (Fallback only if needed): DSE Day-End Archive + server symbol_ohlcv_cache/
+    Never stalls past ~6 seconds and works 24/7 for ANY listed DSE or CSE ticker.
     Zero static/hardcoded prices or sample ticker lists.
     """
     session = get_bd_market_session()
@@ -1042,49 +1163,70 @@ async def fetch_dynamic_ohlcv_for_symbol(
 
     hist_df: pd.DataFrame | None = None
     source_parts: list[str] = []
-
-    # 1. Primary Dynamic Feed: bdshare 120D history (with bounded timeout)
-    try:
-        hist_df = await asyncio.wait_for(asyncio.to_thread(_fetch_bdshare_history_sync, symbol), timeout=9.0)
-        if hist_df is not None and len(hist_df) >= 5:
-            source_parts.append(f"bdshare 90D OHLCV ({session_tag})")
-    except Exception:
-        hist_df = None
-
-    # 2. Mandatory Dynamic Fallback: Official DSE Day-End Archive (works 24/7 after 2:30 PM & weekends)
-    if hist_df is None or len(hist_df) < 10:
-        archive_df = await scrape_dse_day_end_archive(symbol)
-        if archive_df is not None and len(archive_df) > 0:
-            hist_df = archive_df
-            source_parts = [f"Official DSE Day-End Archive OHLCV ({session_tag})"]
-
-    # 3. Real-time / Latest Closing Quote Overlay (board or direct company page)
     live_quote: dict[str, Any] | None = None
     quote_source = ""
 
-    if exchange == "CSE":
-        direct_cse = await scrape_direct_exchange_quote(symbol, "CSE")
-        if direct_cse:
-            live_quote, quote_source = direct_cse
-    else:
+    async def _bdshare_hist_task() -> pd.DataFrame | None:
+        try:
+            return await asyncio.wait_for(asyncio.to_thread(_fetch_bdshare_history_sync, symbol), timeout=6.0)
+        except Exception:
+            return None
+
+    async def _quote_task() -> tuple[dict[str, Any] | None, str]:
+        if exchange == "CSE":
+            direct_cse = await scrape_direct_exchange_quote(symbol, "CSE")
+            if direct_cse:
+                return direct_cse
+            return None, ""
+        # For DSE, check fast cached board or race direct company page + board
+        board_df = cache_get("dse_board_df")
+        if board_df is not None:
+            q = _extract_quote_from_board(board_df, symbol)
+            if q:
+                return q, f"DSE {session_tag} Board"
+        direct_dse = await scrape_new_dse_company_quote(symbol)
+        if direct_dse:
+            return direct_dse
         board_df = await get_dynamic_dse_board()
-        live_quote = _extract_quote_from_board(board_df, symbol)
-        if live_quote:
-            quote_source = f"DSE {session_tag} Board"
+        q = _extract_quote_from_board(board_df, symbol)
+        if q:
+            return q, f"DSE {session_tag} Board"
+        return None, ""
 
-    # If still no historical series OR no live quote yet, hit direct company pages
+    # Phase 1: Run history fetch + live/closing quote fetch concurrently (max ~6s wall time)
+    hist_res, quote_res = await asyncio.gather(
+        _bdshare_hist_task(),
+        _quote_task(),
+        return_exceptions=True,
+    )
+
+    if isinstance(hist_res, pd.DataFrame) and len(hist_res) >= 5:
+        hist_df = hist_res
+        source_parts.append(f"bdshare 90D OHLCV ({session_tag})")
+
+    if isinstance(quote_res, tuple) and quote_res[0]:
+        live_quote, quote_source = quote_res
+
+    # Phase 2: Only if missing BOTH history and quote, race remaining direct scrapers
     if hist_df is None and live_quote is None:
-        direct_res = await scrape_direct_exchange_quote(symbol, exchange)
-        if direct_res:
-            live_quote, quote_source = direct_res
+        direct_fallback, archive_fallback = await asyncio.gather(
+            scrape_direct_exchange_quote(symbol, exchange),
+            scrape_dse_day_end_archive(symbol),
+            return_exceptions=True,
+        )
+        if isinstance(archive_fallback, pd.DataFrame) and len(archive_fallback) > 0:
+            hist_df = archive_fallback
+            source_parts = [f"Official DSE Day-End Archive OHLCV ({session_tag})"]
+        if isinstance(direct_fallback, tuple) and direct_fallback[0]:
+            live_quote, quote_source = direct_fallback
 
-    # If we have a real quote but upstream history timed out, enrich it with cached real history if present
+    # Enrich real quote with server-persisted real history if upstream 90D history timed out
     cached_entry = load_symbol_ohlcv_cache(exchange, symbol)
     if hist_df is None and cached_entry is not None:
         hist_df, cached_label = cached_entry
         source_parts.append(cached_label)
 
-    # Merge fresh live/closing quote onto historical OHLCV frame
+    # Merge fresh live/closing quote onto historical OHLCV frame (or synthesize valid OHLCV window from live quote)
     final_df = _merge_quote_into_df(hist_df, live_quote)
     if final_df is None or len(final_df) == 0:
         return None
@@ -1093,7 +1235,6 @@ async def fetch_dynamic_ohlcv_for_symbol(
         source_parts.append(quote_source)
     source_label = " + ".join(source_parts) if source_parts else f"Official {exchange} {session_tag} Feed"
 
-    # Persist real OHLCV series into server-side symbol_ohlcv_cache/ for instant weekend/repeat queries
     save_symbol_ohlcv_cache(exchange, symbol, final_df, source_label)
     return final_df, source_label
 
@@ -1127,7 +1268,7 @@ async def _verify_candidate_90d(
         try:
             fetched = await asyncio.wait_for(
                 fetch_dynamic_ohlcv_for_symbol(cand["symbol"], "DSE"),
-                timeout=14.0,
+                timeout=6.5,
             )
         except Exception:
             return None
@@ -1288,11 +1429,22 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(title="MukiSoft AI Quantitative Stock Engine (DSE & CSE)", lifespan=lifespan)
 
-raw_origins = os.getenv(
-    "ALLOWED_ORIGINS",
-    "https://stock.mukisoft.tech,http://localhost:3000,http://localhost:5173",
+REQUIRED_CORS_ORIGINS = [
+    "https://stock.mukisoft.tech",
+    "https://www.stock.mukisoft.tech",
+    "http://localhost:5173",
+    "http://localhost:3000",
+]
+raw_origins_combined = ",".join(
+    part
+    for part in (os.getenv("ALLOWED_ORIGINS", ""), os.getenv("ALLOWED_ORIGIN", ""))
+    if part and part.strip()
 )
-allowed_origins = [origin.strip() for origin in raw_origins.split(",") if origin.strip()]
+allowed_origins: list[str] = list(REQUIRED_CORS_ORIGINS)
+for origin_candidate in raw_origins_combined.split(","):
+    cleaned_origin = origin_candidate.strip().rstrip("/")
+    if cleaned_origin and cleaned_origin != "*" and cleaned_origin not in allowed_origins:
+        allowed_origins.append(cleaned_origin)
 
 app.add_middleware(
     CORSMiddleware,
@@ -1306,6 +1458,7 @@ app.add_middleware(
         "X-Device-Hash",
         "X-Subscriber-Id",
         "X-Subscriber-Mobile",
+        "X-Requested-With",
     ],
 )
 
@@ -1320,24 +1473,83 @@ async def get_symbols() -> dict[str, Any]:
     return {"sectors": SECTOR_CATALOG}
 
 
+def _is_valid_dsex_value(val: float) -> bool:
+    return 1_000.0 <= val <= 25_000.0
+
+
+def _is_valid_ds30_value(val: float) -> bool:
+    return 400.0 <= val <= 12_000.0
+
+
+def _extract_bdshare_indices_sync() -> tuple[str, str, str] | None:
+    """Safely extracts DSEX & DS30 from bdshare.get_market_info() by column name & numeric range."""
+    try:
+        mkt = get_market_info()
+        if mkt is None or len(mkt) == 0:
+            return None
+        latest = mkt.iloc[0]
+        dsex_num = 0.0
+        ds30_num = 0.0
+        date_str = str(get_bst_now().date())
+
+        for col_name in mkt.columns:
+            low = str(col_name).strip().lower()
+            val = latest[col_name]
+            if "date" in low and str(val).strip():
+                date_str = str(val).strip()
+            elif "dsex" in low:
+                parsed = _parse_float(val)
+                if _is_valid_dsex_value(parsed):
+                    dsex_num = parsed
+            elif "ds30" in low:
+                parsed = _parse_float(val)
+                if _is_valid_ds30_value(parsed):
+                    ds30_num = parsed
+
+        if _is_valid_dsex_value(dsex_num):
+            ds30_fmt = f"{ds30_num:,.2f}" if _is_valid_ds30_value(ds30_num) else "—"
+            return f"{dsex_num:,.2f}", ds30_fmt, date_str
+    except Exception as exc:
+        logger.debug("bdshare get_market_info extraction failed: %s", exc)
+    return None
+
+
 async def _scrape_dse_indices_fallback() -> tuple[str, str] | None:
-    """Dynamically scrapes DSEX & DS30 indices from official dsebd.org homepage when bdshare stalls."""
+    """
+    Dynamically scrapes real DSEX & DS30 index values from official https://www.dsebd.org/
+    (parses both new Next.js SSR JSON and legacy HTML text, bounded to timeout=6.0s).
+    """
     if _http_client is None:
         return None
     url = "https://www.dsebd.org/"
     if not _is_allowlisted_exchange_url(url):
         return None
     try:
-        resp = await _http_client.get(url, headers=HTTP_HEADERS, timeout=10.0)
+        resp = await _http_client.get(url, headers=HTTP_HEADERS, timeout=6.0)
         if resp.status_code != 200 or not resp.text:
             return None
+
+        # 1. New Next.js SSR JSON embedded on https://www.dsebd.org/
+        unesc = resp.text.replace('\\"', '"')
+        dsex_json = re.search(r'"key":"DSEX","value":([0-9.]+)', unesc)
+        ds30_json = re.search(r'"key":"DS30","value":([0-9.]+)', unesc)
+        if dsex_json:
+            dsex_num = _parse_float(dsex_json.group(1))
+            ds30_num = _parse_float(ds30_json.group(1)) if ds30_json else 0.0
+            if _is_valid_dsex_value(dsex_num):
+                ds30_fmt = f"{ds30_num:,.2f}" if _is_valid_ds30_value(ds30_num) else "—"
+                return f"{dsex_num:,.2f}", ds30_fmt
+
+        # 2. Legacy text pattern fallback
         text = BeautifulSoup(resp.text, "html.parser").get_text(" ", strip=True)
         dsex_match = re.search(r"DSEX\s+Index\s+([0-9,]+\.\d+)", text, re.IGNORECASE)
         ds30_match = re.search(r"DS30\s+Index\s+([0-9,]+\.\d+)", text, re.IGNORECASE)
         if dsex_match:
-            dsex_val = dsex_match.group(1).replace(",", "")
-            ds30_val = ds30_match.group(1).replace(",", "") if ds30_match else "—"
-            return dsex_val, ds30_val
+            dsex_num = _parse_float(dsex_match.group(1))
+            ds30_num = _parse_float(ds30_match.group(1)) if ds30_match else 0.0
+            if _is_valid_dsex_value(dsex_num):
+                ds30_fmt = f"{ds30_num:,.2f}" if _is_valid_ds30_value(ds30_num) else "—"
+                return f"{dsex_num:,.2f}", ds30_fmt
     except Exception as exc:
         logger.debug("DSE homepage index scrape failed: %s", exc)
     return None
@@ -1358,7 +1570,7 @@ def _load_market_live_cache(session: dict[str, Any]) -> dict[str, Any] | None:
         return None
     try:
         saved = json.loads(MARKET_LIVE_CACHE_FILE.read_text(encoding="utf-8"))
-        if isinstance(saved, dict) and saved.get("dsex") and saved.get("dsex") != "—":
+        if isinstance(saved, dict) and _is_valid_dsex_value(_parse_float(saved.get("dsex"))):
             out = dict(saved)
             out["session"] = session
             out["status"] = "live" if session["is_live"] else "closing"
@@ -1373,50 +1585,52 @@ def _load_market_live_cache(session: dict[str, Any]) -> dict[str, Any] | None:
 async def get_live_ticker() -> dict[str, Any]:
     session = get_bd_market_session()
     cached = cache_get("market_live")
-    if cached:
+    if cached and _is_valid_dsex_value(_parse_float(cached.get("dsex"))):
         out = dict(cached)
         out["session"] = session
         return out
 
-    # 1. Primary: bdshare get_market_info (bounded timeout)
-    try:
-        mkt = await asyncio.wait_for(asyncio.to_thread(get_market_info), timeout=8.0)
-        if mkt is not None and len(mkt) > 0:
-            latest = mkt.iloc[0]
-            dsex = str(latest.get("DSEX", latest.iloc[1])).strip()
-            ds30 = str(latest.get("DS30", latest.iloc[2])).strip()
-            if dsex and dsex != "—":
-                payload = {
-                    "status": "live" if session["is_live"] else "closing",
-                    "is_stale": False,
-                    "dsex": dsex,
-                    "ds30": ds30 or "—",
-                    "updated": str(latest.get("Date", get_bst_now().date())),
-                    "session": session,
-                }
-                cache_set("market_live", payload, ttl_seconds=60 if session["is_live"] else 300)
-                _save_market_live_cache(payload)
-                return payload
-    except Exception as exc:
-        logger.warning("Live market index fetch via bdshare failed: %s", exc)
+    async def _bdshare_idx_task() -> tuple[str, str, str] | None:
+        try:
+            return await asyncio.wait_for(asyncio.to_thread(_extract_bdshare_indices_sync), timeout=5.5)
+        except Exception:
+            return None
 
-    # 2. Mandatory Dynamic Fallback: Official dsebd.org homepage index scrape
-    scraped = await _scrape_dse_indices_fallback()
-    if scraped:
-        dsex_val, ds30_val = scraped
+    # Race official dsebd.org homepage SSR JSON and bdshare.get_market_info() in parallel (<=6s)
+    scraped_res, bdshare_res = await asyncio.gather(
+        _scrape_dse_indices_fallback(),
+        _bdshare_idx_task(),
+        return_exceptions=True,
+    )
+
+    dsex_val = ""
+    ds30_val = "—"
+    updated_val = session["bd_time"]
+
+    if isinstance(scraped_res, tuple):
+        dsex_val, ds30_val = scraped_res
+    if (not dsex_val or ds30_val == "—") and isinstance(bdshare_res, tuple):
+        bd_dsex, bd_ds30, bd_date = bdshare_res
+        if not dsex_val:
+            dsex_val = bd_dsex
+            updated_val = bd_date or updated_val
+        if ds30_val == "—" and bd_ds30 != "—":
+            ds30_val = bd_ds30
+
+    if dsex_val:
         payload = {
             "status": "live" if session["is_live"] else "closing",
             "is_stale": False,
             "dsex": dsex_val,
             "ds30": ds30_val,
-            "updated": session["bd_time"],
+            "updated": updated_val,
             "session": session,
         }
         cache_set("market_live", payload, ttl_seconds=60 if session["is_live"] else 300)
         _save_market_live_cache(payload)
         return payload
 
-    # 3. Persisted Real Closing Index Cache
+    # Persisted Real Closing Index Cache (validated numeric range)
     persisted = _load_market_live_cache(session)
     if persisted:
         cache_set("market_live", persisted, ttl_seconds=120)

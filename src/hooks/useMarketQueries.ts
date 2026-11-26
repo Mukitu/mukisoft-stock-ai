@@ -22,7 +22,13 @@ export function useMarketLive() {
     staleTime: 60_000,
     retry: 2,
     retryDelay: 2_500,
-    refetchInterval: session.is_live ? 60_000 : false,
+    refetchInterval: (query) => {
+      const current = query.state.data;
+      if (!current || current.status === 'offline' || current.dsex === 'সংগ্রহ হচ্ছে...') {
+        return 12_000;
+      }
+      return session.is_live ? 60_000 : false;
+    },
   });
 }
 
@@ -33,17 +39,17 @@ export function useTopPicks() {
 
   const query = useQuery({
     queryKey,
-    queryFn: fetchTopPicks,
-    initialData: () => readCachedTopPicks() ?? undefined,
-    staleTime: session.is_live ? 120_000 : 15 * 60_000,
+    queryFn: () => fetchTopPicks(true),
+    placeholderData: () => readCachedTopPicks() ?? undefined,
+    staleTime: session.is_live ? 120_000 : 10 * 60_000,
     retry: 1,
     retryDelay: 1_500,
   });
 
-  // Always refresh live Render picks silently in the background while cards are already visible
+  // Always hydrate live Render picks even if placeholder data rendered immediately
   useEffect(() => {
     let active = true;
-    void fetchLiveTopPicksFromApi(28_000).then((liveResult) => {
+    void fetchLiveTopPicksFromApi(20_000).then((liveResult) => {
       if (active && liveResult && liveResult.picks.length > 0) {
         queryClient.setQueryData(queryKey, liveResult);
       }

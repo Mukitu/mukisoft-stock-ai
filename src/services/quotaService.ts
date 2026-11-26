@@ -7,16 +7,13 @@
 
 import { getDeviceFingerprintHash } from '../utils/deviceFingerprint';
 import { toBanglaDigits } from '../utils/quantConsensus';
+import { API_BASE_URL as DEFAULT_API_BASE } from '../utils/apiBaseUrl';
 import { BDAPPS_API_BASE, getBdappsSession, isSessionActive } from './bdappsService';
 
 export const FREE_QUOTA_LIMIT = 2;
 export const QUOTA_WINDOW_SECONDS = 86_400; // 24 hours
 export const QUOTA_STORAGE_KEY = 'ms_free_quota_state_v1';
 export const QUOTA_UPDATED_EVENT = 'ms-free-quota-updated';
-
-const DEFAULT_API_BASE = (
-  import.meta.env.VITE_API_BASE_URL || 'https://mukisoft-stock-ai.onrender.com'
-).replace(/\/+$/, '');
 
 export const QUOTA_ENDPOINT_URL = (
   import.meta.env.VITE_QUOTA_API_URL || `${BDAPPS_API_BASE}/free_quota.php`

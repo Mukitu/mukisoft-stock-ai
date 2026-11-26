@@ -494,7 +494,7 @@ export function BdappsSubscriptionCard({
 
           <div className="space-y-1">
             <h2 className="text-lg sm:text-2xl font-extrabold text-slate-900 tracking-tight leading-snug">
-              ৳২.৭৮ টাকা /দিন{' '}
+              ২.৭৮ টাকা /দিন{' '}
               <span className="text-xs sm:text-sm font-semibold text-slate-600 inline-block">
                 (ভ্যাট + এসডি + এসসি সহ)
               </span>

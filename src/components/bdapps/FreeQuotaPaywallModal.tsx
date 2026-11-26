@@ -90,7 +90,7 @@ export function FreeQuotaPaywallModal({
           <p className="text-xs sm:text-sm text-slate-700 leading-relaxed font-medium">
             অপেক্ষা না করে এখনই আনলিমিটেড DSE ও CSE স্টক AI টেকনিক্যাল বিশ্লেষণ ও ৬টি Strong Bullish Setup পর্যবেক্ষণ পেতে সাবস্ক্রাইব করুন —{' '}
             <strong className="text-slate-900">
-              মাত্র ৳২.৭৮ টাকা /দিন (ভ্যাট + এসডি + এসসি সহ)
+              মাত্র ২.৭৮ টাকা /দিন (ভ্যাট + এসডি + এসসি সহ)
             </strong>
             ।
           </p>

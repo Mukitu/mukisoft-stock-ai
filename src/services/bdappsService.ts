@@ -4,12 +4,10 @@
  * so $_POST reads every parameter cleanly.
  */
 
+import { API_BASE_URL as BACKEND_API_BASE } from '../utils/apiBaseUrl';
+
 export const BDAPPS_API_BASE = (
   import.meta.env.VITE_BDAPPS_API_BASE || 'https://stock.skillproof.top'
-).replace(/\/+$/, '');
-
-const BACKEND_API_BASE = (
-  import.meta.env.VITE_API_BASE_URL || 'https://mukisoft-stock-ai.onrender.com'
 ).replace(/\/+$/, '');
 
 export const BDAPPS_SESSION_KEY = 'ms_bdapps_session';

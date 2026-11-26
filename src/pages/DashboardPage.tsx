@@ -352,7 +352,7 @@ export function DashboardPage() {
               <div className="flex items-center justify-between gap-3 bg-slate-50 border border-slate-200/80 rounded-xl px-4 py-3">
                 <dt className="text-xs font-medium text-slate-500">চার্জ রেট</dt>
                 <dd className="text-xs font-bold text-slate-900">
-                  ৳২.৭৮ টাকা /দিন <span className="font-normal text-slate-500">(ভ্যাট + এসডি + এসসি সহ)</span>
+                  ২.৭৮ টাকা /দিন <span className="font-normal text-slate-500">(ভ্যাট + এসডি + এসসি সহ)</span>
                 </dd>
               </div>
 
@@ -554,7 +554,7 @@ export function DashboardPage() {
               <div>
                 নম্বর: <strong className="font-mono-num text-slate-900">{maskBdMobile(session.mobile)}</strong>
               </div>
-              <div>বাতিল করার পর আপনার Robi &amp; Cirkle নম্বর থেকে দৈনিক ৳২.৭৮ চার্জ বন্ধ হয়ে যাবে।</div>
+              <div>বাতিল করার পর আপনার Robi &amp; Cirkle নম্বর থেকে দৈনিক ২.৭৮ টাকা চার্জ বন্ধ হয়ে যাবে।</div>
             </div>
 
             {unsubError && (

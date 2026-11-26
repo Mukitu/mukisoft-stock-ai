@@ -19,9 +19,9 @@ import {
   syncQuotaState,
 } from './quotaService';
 
-export const API_BASE_URL = (
-  import.meta.env.VITE_API_BASE_URL || 'https://mukisoft-stock-ai.onrender.com'
-).replace(/\/+$/, '');
+import { API_BASE_URL } from '../utils/apiBaseUrl';
+
+export { API_BASE_URL };
 
 export const LIVE_FEED_WAITING_BN =
   'লাইভ ও সর্বশেষ ক্লোজিং মার্কেট ডেটা সংগ্রহ করে ১৭-ফিচার XGBoost বিশ্লেষণ চলছে...';
@@ -180,24 +180,41 @@ async function loadLockedDailySnapshot(): Promise<{
 export async function fetchMarketLive(): Promise<MarketLiveTicker> {
   const session = getBDMarketSession();
   try {
-    const res = await fetchWithTimeout(`${API_BASE_URL}/api/market-live`, {}, 20_000);
+    const res = await fetchWithTimeout(`${API_BASE_URL}/api/market-live`, {}, 15_000);
     if (res.ok) {
       const data = await res.json();
       const dsex = String(data.dsex || '').trim();
       const ds30 = String(data.ds30 || '').trim();
-      if (dsex && dsex !== '—') {
+      const dsexNum = Number(dsex.replace(/,/g, ''));
+      const ds30Num = Number(ds30.replace(/,/g, ''));
+      const isValidDsex = Number.isFinite(dsexNum) && dsexNum >= 1000 && dsexNum <= 25000;
+      const isValidDs30 = Number.isFinite(ds30Num) && ds30Num >= 400 && ds30Num <= 12000;
+      if (isValidDsex) {
         return {
           status: data.status === 'live' || data.status === 'closing' ? 'live' : 'degraded',
           is_stale: Boolean(data.is_stale),
-          dsex,
-          ds30: ds30 || '—',
+          dsex: dsexNum.toLocaleString('en-US', {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+          }),
+          ds30: isValidDs30
+            ? ds30Num.toLocaleString('en-US', {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              })
+            : '—',
           updated: String(data.updated || session.bd_time),
           session,
         };
       }
+      if (dsex && dsex !== '—') {
+        console.warn('[MukiSoft API] Unexpected DSEX/DS30 payload from /api/market-live:', data);
+      }
+    } else {
+      console.error(`[MukiSoft API] /api/market-live HTTP ${res.status}`);
     }
-  } catch {
-    // Zero fake fallback numbers when live feed is unreachable
+  } catch (err) {
+    console.error('[MukiSoft API] /api/market-live request failed:', err);
   }
 
   return {
@@ -265,32 +282,32 @@ export async function fetchLiveTopPicksFromApi(timeoutMs = 28_000): Promise<TopP
   return null;
 }
 
-export async function fetchTopPicks(): Promise<TopPicksResponse> {
+export async function fetchTopPicks(preferLive = true): Promise<TopPicksResponse> {
   const session = getBDMarketSession();
 
-  // 1. Instant 0ms localStorage cache from latest verified session (if present)
+  // 1. Always attempt fresh dynamic picks from Render backend first when requested
+  if (preferLive) {
+    const liveResult = await fetchLiveTopPicksFromApi(20_000);
+    if (liveResult) {
+      return liveResult;
+    }
+  }
+
+  // 2. Fall back to latest verified localStorage cache from an earlier live Render response
   const localCached = readCachedTopPicks();
   if (localCached && localCached.picks.length > 0) {
     return localCached;
   }
 
-  // 2. Instant (~15ms) latest closing DSE/CSE snapshot from /assets/daily_picks.json
+  // 3. Last-resort fallback to closing snapshot only if Render is unreachable on cold start
   const snapshot = await loadLockedDailySnapshot();
   if (snapshot && snapshot.picks.length > 0) {
-    const out: TopPicksResponse = {
+    return {
       generated_at_bst: snapshot.generated_at_bst,
       source: 'daily_snapshot',
       live_unavailable: false,
       picks: snapshot.picks,
     };
-    saveCachedTopPicks(out);
-    return out;
-  }
-
-  // 3. Fallback to live API only if neither cache nor daily_picks.json had picks
-  const liveResult = await fetchLiveTopPicksFromApi(28_000);
-  if (liveResult) {
-    return liveResult;
   }
 
   return {
@@ -334,14 +351,16 @@ export async function analyzeStock(symbol: string, exchange: Exchange): Promise<
 
   const quotaHeaders = await getQuotaRequestHeaders();
 
+  const endpointUrl = `${API_BASE_URL}/api/analyze?symbol=${encodeURIComponent(cleanSym)}&exchange=${encodeURIComponent(exchange)}`;
   let res: Response;
   try {
     res = await fetchWithTimeout(
-      `${API_BASE_URL}/api/analyze?symbol=${encodeURIComponent(cleanSym)}&exchange=${encodeURIComponent(exchange)}`,
+      endpointUrl,
       { headers: quotaHeaders },
       35_000
     );
-  } catch {
+  } catch (err) {
+    console.error(`[MukiSoft API] /api/analyze network/timeout error for ${cleanSym} (${exchange}):`, err);
     throw new BackendWakeupError();
   }
 
@@ -357,12 +376,14 @@ export async function analyzeStock(symbol: string, exchange: Exchange): Promise<
     );
   }
   if (res.status >= 500) {
+    console.error(`[MukiSoft API] /api/analyze HTTP ${res.status} for ${cleanSym}:`, data);
     throw new BackendWakeupError(
       (data && typeof data.detail === 'string' && data.detail) || undefined,
       res.status
     );
   }
   if (!res.ok || !data || !data.current_price) {
+    console.error(`[MukiSoft API] /api/analyze unexpected response (${res.status}) for ${cleanSym}:`, data);
     throw new BackendWakeupError(
       (data && typeof data.detail === 'string' && data.detail) || undefined,
       res.status || 503

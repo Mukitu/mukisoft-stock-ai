@@ -735,7 +735,7 @@ export function AnalyzerPage() {
             onClick={() => setPaywallOpen(true)}
             className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-blue-700 hover:bg-blue-800 text-white text-sm font-bold cursor-pointer"
           >
-            <span>Robi &amp; Cirkle দিয়ে আনলক করুন (৳২.৭৮/দিন)</span>
+            <span>Robi &amp; Cirkle দিয়ে আনলক করুন (২.৭৮ টাকা/দিন)</span>
           </button>
         </div>
       ) : !activeQuery.symbol && !currentAnalysis ? (
