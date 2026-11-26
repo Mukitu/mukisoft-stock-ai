@@ -4,11 +4,38 @@
  * so $_POST reads every parameter cleanly.
  */
 
-import { API_BASE_URL as BACKEND_API_BASE } from '../utils/apiBaseUrl';
+import { getApiCandidateUrls } from '../utils/apiBaseUrl';
 
-export const BDAPPS_API_BASE = (
-  import.meta.env.VITE_BDAPPS_API_BASE || 'https://stock.skillproof.top'
-).replace(/\/+$/, '');
+const DEFAULT_BDAPPS_API_BASE = 'https://stock.skillproof.top';
+
+export function resolveBdappsApiBase(rawEnv?: string): string {
+  const candidate = String(rawEnv ?? '').trim().replace(/\/+$/, '');
+  if (!candidate || candidate.startsWith('/')) {
+    return DEFAULT_BDAPPS_API_BASE;
+  }
+  try {
+    const withProtocol = candidate.startsWith('http://')
+      ? `https://${candidate.slice(7)}`
+      : candidate;
+    const parsed = new URL(withProtocol);
+    if (parsed.protocol !== 'https:') {
+      return DEFAULT_BDAPPS_API_BASE;
+    }
+    const hostname = parsed.hostname.toLowerCase();
+    if (
+      hostname === 'stock.mukisoft.tech' ||
+      hostname === 'www.stock.mukisoft.tech' ||
+      hostname.endsWith('.vercel.app')
+    ) {
+      return DEFAULT_BDAPPS_API_BASE;
+    }
+    return parsed.origin + parsed.pathname.replace(/\/+$/, '');
+  } catch {
+    return DEFAULT_BDAPPS_API_BASE;
+  }
+}
+
+export const BDAPPS_API_BASE = resolveBdappsApiBase(import.meta.env.VITE_BDAPPS_API_BASE);
 
 export const BDAPPS_SESSION_KEY = 'ms_bdapps_session';
 export const BDAPPS_MSISDN_KEY = 'ms_bdapps_msisdn';
@@ -544,14 +571,98 @@ export function consumeBdappsToast(): string | null {
   }
 }
 
+const BDAPPS_RELAY_PATH_MAP: Record<string, string> = {
+  'check_subscription.php': '/api/bdapps/check',
+  'send_otp.php': '/api/bdapps/send-otp',
+  'verify_otp.php': '/api/bdapps/verify-otp',
+  'unsubscribe.php': '/api/bdapps/unsubscribe',
+};
+
+function parseBdappsResponseText(text: string, res: Response): { parsed: BdappsApiResponse; isJson: boolean } {
+  if (!text.trim()) {
+    return { parsed: { success: res.ok }, isJson: false };
+  }
+  try {
+    const json = JSON.parse(text) as BdappsApiResponse;
+    if (json && typeof json === 'object') {
+      return { parsed: json, isJson: true };
+    }
+  } catch {
+    // Non-JSON response (e.g., HTML error page or proxy gateway block)
+  }
+  return {
+    parsed: {
+      success: false,
+      message: undefined,
+    },
+    isJson: false,
+  };
+}
+
+async function postViaRenderRelay(
+  relayPath: string,
+  fields: Record<string, string>,
+  timeoutMs: number
+): Promise<BdappsApiResponse> {
+  const candidates = getApiCandidateUrls(relayPath);
+  let lastError: Error | null = null;
+  let lastWasTimeout = false;
+
+  for (const url of candidates) {
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify(fields),
+        signal: controller.signal,
+      });
+
+      const text = await res.text();
+      const { parsed, isJson } = parseBdappsResponseText(text, res);
+      if (!isJson && !res.ok) {
+        lastError = new Error(`Relay HTTP ${res.status}`);
+        continue;
+      }
+
+      parsed._httpOk = res.ok;
+      parsed._httpStatus = res.status;
+
+      if (!res.ok && !parsed.message && !parsed.statusDetail && !parsed.error) {
+        parsed.error = `সার্ভার থেকে সঠিক উত্তর পাওয়া যায়নি (HTTP ${res.status})।`;
+      }
+      return parsed;
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        lastWasTimeout = true;
+      }
+      lastError = err instanceof Error ? err : new Error('Relay fetch failed');
+    } finally {
+      window.clearTimeout(timer);
+    }
+  }
+
+  if (lastWasTimeout) {
+    throw new Error('বিডিঅ্যাপস সার্ভার সাড়া দিতে সময় নিচ্ছে। অনুগ্রহ করে আবার চেষ্টা করুন।');
+  }
+  throw lastError || new Error('বিডিঅ্যাপস সার্ভারের সাথে সংযোগ স্থাপন করা যায়নি। ইন্টারনেট সংযোগ যাচাই করে আবার চেষ্টা করুন।');
+}
+
 async function postFormEndpoint(
   endpoint: string,
   fields: Record<string, string>,
   timeoutMs = 15_000,
   fetchOptions?: RequestInit
 ): Promise<BdappsApiResponse> {
+  const cleanScript = endpoint.split('?')[0];
+  const relayPath = BDAPPS_RELAY_PATH_MAP[cleanScript];
   const controller = new AbortController();
   const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+  let directTimedOut = false;
 
   try {
     const body = new URLSearchParams(fields);
@@ -561,21 +672,21 @@ async function postFormEndpoint(
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
         Accept: 'application/json, text/plain, */*',
-        ...(fetchOptions?.headers || {}),
       },
       body: body.toString(),
       signal: controller.signal,
     });
 
     const text = await res.text();
-    let parsed: BdappsApiResponse = {};
-    try {
-      parsed = text ? (JSON.parse(text) as BdappsApiResponse) : {};
-    } catch {
-      parsed = {
-        success: res.ok,
-        message: text || undefined,
-      };
+    const { parsed, isJson } = parseBdappsResponseText(text, res);
+
+    // If direct cPanel PHP returned a 5xx gateway error or non-JSON HTML, retry via Render relay
+    if (relayPath && (!isJson || res.status >= 500)) {
+      try {
+        return await postViaRenderRelay(relayPath, fields, Math.max(timeoutMs, 22_000));
+      } catch {
+        // Fall through to return direct payload if JSON, or throw below
+      }
     }
 
     parsed._httpOk = res.ok;
@@ -588,6 +699,21 @@ async function postFormEndpoint(
     return parsed;
   } catch (err) {
     if (err instanceof DOMException && err.name === 'AbortError') {
+      directTimedOut = true;
+    }
+
+    // Safari CORS / Load failed / ISP routing / timeout fallback -> Render server-to-server relay
+    if (relayPath) {
+      try {
+        return await postViaRenderRelay(relayPath, fields, Math.max(timeoutMs, 22_000));
+      } catch (relayErr) {
+        if (relayErr instanceof Error && relayErr.message.includes('বিডিঅ্যাপস')) {
+          throw relayErr;
+        }
+      }
+    }
+
+    if (directTimedOut) {
       throw new Error('বিডিঅ্যাপস সার্ভার সাড়া দিতে সময় নিচ্ছে। অনুগ্রহ করে আবার চেষ্টা করুন।');
     }
     throw new Error('বিডিঅ্যাপস সার্ভারের সাথে সংযোগ স্থাপন করা যায়নি। ইন্টারনেট সংযোগ যাচাই করে আবার চেষ্টা করুন।');
@@ -649,31 +775,60 @@ export async function unsubscribeBdapps(params: {
   return postFormEndpoint('unsubscribe.php', fields);
 }
 
+async function postBackendSessionEndpoint<T>(
+  apiPath: string,
+  payload: Record<string, unknown>,
+  timeoutMs: number,
+  options?: { keepalive?: boolean }
+): Promise<T | null> {
+  const candidates = getApiCandidateUrls(apiPath);
+  for (const url of candidates) {
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        keepalive: options?.keepalive ?? false,
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      });
+      if (!res.ok) {
+        continue;
+      }
+      const data = (await res.json().catch(() => null)) as T | null;
+      if (data && typeof data === 'object') {
+        return data;
+      }
+    } catch {
+      // Try next candidate URL
+    } finally {
+      window.clearTimeout(timer);
+    }
+  }
+  return null;
+}
+
 /**
  * Server-Side Single-Session Claim (Cross-Browser / Cross-Device Lock)
  */
 export async function claimSubscriberSession(session: BdappsSession): Promise<void> {
   writeLocalActiveSessionLock(session);
-  const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), 12_000);
+  const msisdn = normalizeBdMsisdn(session.msisdn || session.mobile || session.subscriberId);
 
-  const reqPromise = fetch(`${BACKEND_API_BASE}/api/subscriber-session/claim`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    keepalive: true,
-    body: JSON.stringify({
+  const reqPromise = postBackendSessionEndpoint<Record<string, unknown>>(
+    '/api/subscriber-session/claim',
+    {
+      msisdn: msisdn ? `+${msisdn}` : session.mobile,
       mobile: session.mobile,
       subscriberId: session.subscriberId,
       sessionToken: session.sessionToken,
       source: session.source,
       verifiedAt: session.verifiedAt,
-    }),
-    signal: controller.signal,
-  })
-    .catch(() => undefined)
-    .finally(() => {
-      window.clearTimeout(timer);
-    });
+    },
+    12_000,
+    { keepalive: true }
+  ).then(() => undefined);
 
   // Wait up to 3.5s so an awake server records the new token before navigation fires,
   // while never blocking the user if Render is waking from cold start.
@@ -696,37 +851,45 @@ export async function verifyActiveSubscriberSession(
     return 'session_replaced';
   }
 
+  const msisdn = normalizeBdMsisdn(session.msisdn || session.mobile || session.subscriberId);
+
   const verifyBackendLock = async (): Promise<SessionVerifyResult> => {
-    const controller = new AbortController();
-    const timer = window.setTimeout(() => controller.abort(), 6_000);
     try {
-      const res = await fetch(`${BACKEND_API_BASE}/api/subscriber-session/verify`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({
+      const data = await postBackendSessionEndpoint<{
+        valid?: boolean;
+        active?: boolean;
+        subscribed?: boolean;
+        revoked?: boolean;
+        reason?: string;
+      }>(
+        '/api/subscriber-session/verify',
+        {
+          msisdn: msisdn ? `+${msisdn}` : session.mobile,
           mobile: session.mobile,
           subscriberId: session.subscriberId,
           sessionToken: session.sessionToken,
           source: session.source,
           verifiedAt: session.verifiedAt,
-        }),
-        signal: controller.signal,
-      });
+        },
+        6_000
+      );
 
-      if (res.ok) {
-        const data = (await res.json().catch(() => null)) as {
-          valid?: boolean;
-          reason?: string;
-        } | null;
-        if (data && data.valid === false) {
+      if (data) {
+        if (
+          data.revoked === true ||
+          data.subscribed === false ||
+          data.reason === 'UNSUBSCRIBED' ||
+          (data.active === false && data.reason !== 'SESSION_REPLACED')
+        ) {
+          return 'unsubscribed';
+        }
+        if (data.valid === false) {
           if (data.reason === 'SESSION_REPLACED') return 'session_replaced';
-          if (data.reason === 'UNSUBSCRIBED') return 'unsubscribed';
+          return 'unsubscribed';
         }
       }
     } catch {
       // Transient network blip during cold start: do not falsely log out active subscriber
-    } finally {
-      window.clearTimeout(timer);
     }
     return 'valid';
   };
@@ -738,6 +901,7 @@ export async function verifyActiveSubscriberSession(
     try {
       const subRes = await checkBdappsSubscription(session.mobile);
       if (isUnregisteredPayload(subRes)) {
+        void revokeSubscriberSession(session);
         return 'unsubscribed';
       }
     } catch {
@@ -746,46 +910,141 @@ export async function verifyActiveSubscriberSession(
     return 'valid';
   };
 
-  const [bdappsVerdict, lockVerdict] = await Promise.all([
-    verifyBdappsLiveStatus(),
-    verifyBackendLock(),
-  ]);
+  // Race both checks so an 'unsubscribed' verdict from either Render or BDApps
+  // triggers immediate logout without waiting for a slower peer request.
+  return await new Promise<SessionVerifyResult>((resolve) => {
+    let settled = false;
+    let remaining = 2;
+    let bdappsResult: SessionVerifyResult = 'valid';
+    let lockResult: SessionVerifyResult = 'valid';
 
-  if (bdappsVerdict === 'unsubscribed' || lockVerdict === 'unsubscribed') {
-    return 'unsubscribed';
-  }
-  if (lockVerdict === 'session_replaced') {
-    return 'session_replaced';
-  }
+    const finishIfDone = () => {
+      if (settled) return;
+      if (bdappsResult === 'unsubscribed' || lockResult === 'unsubscribed') {
+        settled = true;
+        resolve('unsubscribed');
+        return;
+      }
+      if (remaining === 0) {
+        settled = true;
+        resolve(lockResult === 'session_replaced' ? 'session_replaced' : 'valid');
+      }
+    };
 
-  return 'valid';
+    void verifyBdappsLiveStatus().then((res) => {
+      bdappsResult = res;
+      remaining -= 1;
+      finishIfDone();
+    });
+
+    void verifyBackendLock().then((res) => {
+      lockResult = res;
+      remaining -= 1;
+      finishIfDone();
+    });
+  });
 }
 
 /**
- * Release server-side session lock cleanly on unsubscribe
+ * Immediately mark a subscriber MSISDN as revoked/unsubscribed on Render's
+ * memory & disk store so all other active devices log out on their next verify check.
+ */
+export async function revokeSubscriberSession(
+  sessionOrIdentity:
+    | BdappsSession
+    | {
+        msisdn?: string;
+        mobile?: string;
+        userMobile?: string;
+        subscriberId?: string;
+        sessionToken?: string;
+      }
+): Promise<void> {
+  const rawMobile =
+    ('mobile' in sessionOrIdentity ? sessionOrIdentity.mobile : undefined) ||
+    ('userMobile' in sessionOrIdentity ? sessionOrIdentity.userMobile : undefined) ||
+    sessionOrIdentity.msisdn ||
+    sessionOrIdentity.subscriberId ||
+    '';
+  const normalized = normalizeBdMsisdn(rawMobile);
+  const payload = {
+    msisdn: normalized ? `+${normalized}` : rawMobile,
+    mobile: rawMobile,
+    subscriberId: sessionOrIdentity.subscriberId || (normalized ? `tel:${normalized}` : undefined),
+    sessionToken: sessionOrIdentity.sessionToken,
+    reason: 'UNSUBSCRIBED',
+  };
+
+  const reqPromise = postBackendSessionEndpoint<Record<string, unknown>>(
+    '/api/subscriber-session/revoke',
+    payload,
+    5_000,
+    { keepalive: true }
+  ).then(() => undefined);
+
+  await Promise.race([
+    reqPromise,
+    new Promise<void>((resolve) => window.setTimeout(resolve, 4_000)),
+  ]);
+}
+
+/**
+ * Release server-side session lock cleanly on unsubscribe (aliases revokeSubscriberSession)
  */
 export async function releaseSubscriberSession(session: BdappsSession): Promise<void> {
-  const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), 5_000);
-  try {
-    await fetch(`${BACKEND_API_BASE}/api/subscriber-session/release`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      keepalive: true,
-      body: JSON.stringify({
-        mobile: session.mobile,
-        subscriberId: session.subscriberId,
-        sessionToken: session.sessionToken,
-        source: session.source,
-        verifiedAt: session.verifiedAt,
-      }),
-      signal: controller.signal,
-    });
-  } catch {
-    // Best effort
-  } finally {
-    window.clearTimeout(timer);
+  await revokeSubscriberSession(session);
+}
+
+/**
+ * Complete One-Click Unsubscribe flow:
+ * 1. Calls official BDApps unsubscribe.php
+ * 2. Immediately revokes the MSISDN on Render (/api/subscriber-session/revoke)
+ * 3. Purges all local cookies, localStorage, and sessionStorage state
+ */
+export async function unsubscribeBdappsSubscription(
+  sessionOrParams:
+    | BdappsSession
+    | {
+        subscriberId?: string;
+        userMobile?: string;
+        mobile?: string;
+        msisdn?: string;
+        sessionToken?: string;
+      },
+  options?: { skipToast?: boolean }
+): Promise<BdappsApiResponse> {
+  const userMobile =
+    ('mobile' in sessionOrParams ? sessionOrParams.mobile : undefined) ||
+    ('userMobile' in sessionOrParams ? sessionOrParams.userMobile : undefined) ||
+    sessionOrParams.msisdn;
+  const subscriberId = sessionOrParams.subscriberId;
+
+  const res = await unsubscribeBdapps({
+    subscriberId,
+    userMobile,
+  });
+
+  if (res.success === false && res.isSubscribed !== false) {
+    return res;
   }
+
+  await revokeSubscriberSession({
+    msisdn: sessionOrParams.msisdn,
+    mobile: userMobile,
+    subscriberId,
+    sessionToken: sessionOrParams.sessionToken,
+  });
+
+  if (!options?.skipToast) {
+    setBdappsToast(UNSUBSCRIBED_TOAST_BN);
+  }
+
+  purgeAllSubscriberState({
+    forceClearLock: true,
+    currentSessionToken: sessionOrParams.sessionToken,
+  });
+
+  return res;
 }
 
 /**

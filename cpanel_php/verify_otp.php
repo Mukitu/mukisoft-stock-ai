@@ -15,16 +15,21 @@ header('Content-Type: application/json; charset=UTF-8');
 
 $allowedOrigins = [
     'https://stock.mukisoft.tech',
+    'https://www.stock.mukisoft.tech',
     'http://localhost:3000',
     'http://localhost:5173',
 ];
 $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
-if (in_array($origin, $allowedOrigins, true)) {
+if (
+    in_array($origin, $allowedOrigins, true)
+    || preg_match('/^https:\/\/ais-(?:dev|pre)-[a-z0-9-]+\.[a-z0-9-]+\.run\.app$/', $origin)
+) {
     header('Access-Control-Allow-Origin: ' . $origin);
     header('Vary: Origin');
 }
 header('Access-Control-Allow-Methods: POST, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, Accept');
+header('Access-Control-Allow-Headers: Content-Type, Accept, X-Requested-With');
+header('Access-Control-Max-Age: 3600');
 
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'OPTIONS') {
     http_response_code(204);

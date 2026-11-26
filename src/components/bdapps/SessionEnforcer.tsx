@@ -16,7 +16,7 @@ import {
 } from '../../services/bdappsService';
 
 const FOCUS_DEBOUNCE_MS = 1_000;
-const SUBSCRIPTION_POLL_INTERVAL_MS = 30_000;
+const SUBSCRIPTION_POLL_INTERVAL_MS = 10_000;
 
 export function SessionEnforcer() {
   const location = useLocation();
@@ -118,10 +118,11 @@ export function SessionEnforcer() {
     });
   }, [location.pathname, location.state, runSessionVerification]);
 
-  // 2. Lightweight 30-second background polling against check_subscription.php?_t=... whenever subscribed
+  // 2. Lightweight 10-second background polling against Render session verify + check_subscription.php?_t=... while tab is visible
   useEffect(() => {
     if (!hasActiveSession) return;
     const pollId = window.setInterval(() => {
+      if (document.visibilityState !== 'visible') return;
       void runSessionVerification({
         force: true,
         checkSubscription: true,

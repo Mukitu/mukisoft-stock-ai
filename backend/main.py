@@ -48,8 +48,12 @@ from quant_engine import (
 from quota_store import (
     FREE_QUOTA_LIMIT,
     check_and_consume_quota,
+    claim_subscriber_session_record,
     extract_client_ip,
     get_quota_status,
+    is_subscriber_revoked,
+    revoke_subscriber_session_record,
+    verify_subscriber_session_record,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -244,11 +248,20 @@ def _normalize_bd_mobile(raw_mobile: str | None, raw_subscriber_id: str | None) 
 
 
 class SubscriberSessionPayload(BaseModel):
+    msisdn: str | None = Field(default=None, max_length=24)
     mobile: str | None = Field(default=None, max_length=24)
     subscriberId: str | None = Field(default=None, max_length=64)
     sessionToken: str = Field(..., min_length=8, max_length=128)
     source: Literal["check_subscription", "send_otp", "verify_otp"] = "check_subscription"
     verifiedAt: int | None = Field(default=None, ge=0)
+
+
+class SubscriberRevokePayload(BaseModel):
+    msisdn: str | None = Field(default=None, max_length=24)
+    mobile: str | None = Field(default=None, max_length=24)
+    subscriberId: str | None = Field(default=None, max_length=64)
+    sessionToken: str | None = Field(default=None, max_length=128)
+    reason: str | None = Field(default=None, max_length=64)
 
 
 def _subscriber_key(normalized_mobile: str) -> str:
@@ -298,6 +311,8 @@ async def _check_bdapps_status_detailed(
 
     cache_key = f"bdapps_sub:{normalized_mobile}"
     if not bypass_cache:
+        if is_subscriber_revoked(_subscriber_key(normalized_mobile), within_seconds=120):
+            return False, "UNSUBSCRIBED"
         cached = cache_get(cache_key)
         if cached is not None:
             return bool(cached), "REGISTERED" if cached else "UNREGISTERED"
@@ -2224,7 +2239,7 @@ async def analyze_document(
 
 @app.post("/api/subscriber-session/claim")
 async def claim_subscriber_session(payload: SubscriberSessionPayload) -> dict[str, Any]:
-    normalized_mobile = _normalize_bd_mobile(payload.mobile, payload.subscriberId)
+    normalized_mobile = _normalize_bd_mobile(payload.mobile or payload.msisdn, payload.subscriberId)
     if not normalized_mobile:
         raise HTTPException(status_code=422, detail="সঠিক Robi & Cirkle নম্বর পাওয়া যায়নি।")
 
@@ -2242,74 +2257,192 @@ async def claim_subscriber_session(payload: SubscriberSessionPayload) -> dict[st
             raise HTTPException(status_code=403, detail="সাবস্ক্রিপশন বর্তমানে সক্রিয় নয়।")
 
     key = _subscriber_key(normalized_mobile)
-    now_ms = int(time.time() * 1000)
-    with _SESSION_STORE_LOCK:
-        store = _load_session_store_unlocked()
-        store[key] = {
-            "sessionToken": token,
-            "status": "ACTIVE",
-            "updatedAt": now_ms,
-        }
-        _save_session_store_unlocked(store)
-
+    record = claim_subscriber_session_record(key, token)
     cache_set(f"bdapps_sub:{normalized_mobile}", True, ttl_seconds=300)
-    return {"claimed": True, "sessionToken": token, "updatedAt": now_ms}
+    return {
+        "claimed": True,
+        "active": True,
+        "subscribed": True,
+        "revoked": False,
+        "sessionToken": token,
+        "updatedAt": record["updatedAt"],
+    }
 
 
 @app.post("/api/subscriber-session/verify")
 async def verify_subscriber_session(payload: SubscriberSessionPayload) -> dict[str, Any]:
-    normalized_mobile = _normalize_bd_mobile(payload.mobile, payload.subscriberId)
+    normalized_mobile = _normalize_bd_mobile(payload.mobile or payload.msisdn, payload.subscriberId)
     if not normalized_mobile:
-        return {"valid": False, "reason": "UNSUBSCRIBED"}
+        return {
+            "valid": False,
+            "active": False,
+            "subscribed": False,
+            "revoked": True,
+            "reason": "UNSUBSCRIBED",
+        }
 
     token = payload.sessionToken.strip()
     if not SESSION_TOKEN_REGEX.match(token):
-        return {"valid": False, "reason": "SESSION_REPLACED"}
+        return {
+            "valid": False,
+            "active": False,
+            "subscribed": True,
+            "revoked": False,
+            "reason": "SESSION_REPLACED",
+        }
 
     key = _subscriber_key(normalized_mobile)
-    now_ms = int(time.time() * 1000)
+    return verify_subscriber_session_record(key, token)
 
-    with _SESSION_STORE_LOCK:
-        store = _load_session_store_unlocked()
-        record = store.get(key)
-        if isinstance(record, dict):
-            if record.get("status") == "UNSUBSCRIBED":
-                return {"valid": False, "reason": "UNSUBSCRIBED", "updatedAt": record.get("updatedAt")}
-            stored_token = str(record.get("sessionToken") or "")
-            if stored_token and stored_token != token:
-                return {"valid": False, "reason": "SESSION_REPLACED", "updatedAt": record.get("updatedAt")}
-        else:
-            # First sight after cold restart: adopt the provided token so subsequent Browser B logins displace it
-            store[key] = {
-                "sessionToken": token,
-                "status": "ACTIVE",
-                "updatedAt": now_ms,
-            }
-            _save_session_store_unlocked(store)
 
-    return {"valid": True, "reason": "OK"}
+async def _revoke_subscriber_session_impl(payload: SubscriberRevokePayload) -> dict[str, Any]:
+    normalized_mobile = _normalize_bd_mobile(payload.mobile or payload.msisdn, payload.subscriberId)
+    if not normalized_mobile:
+        return {
+            "revoked": True,
+            "released": True,
+            "active": False,
+            "subscribed": False,
+            "reason": "UNSUBSCRIBED",
+        }
+
+    key = _subscriber_key(normalized_mobile)
+    cache_set(f"bdapps_sub:{normalized_mobile}", False, ttl_seconds=60)
+    record = revoke_subscriber_session_record(key)
+    return {
+        "revoked": True,
+        "released": True,
+        "active": False,
+        "subscribed": False,
+        "reason": "UNSUBSCRIBED",
+        "updatedAt": record["updatedAt"],
+    }
+
+
+@app.post("/api/subscriber-session/revoke")
+async def revoke_subscriber_session(payload: SubscriberRevokePayload) -> dict[str, Any]:
+    return await _revoke_subscriber_session_impl(payload)
 
 
 @app.post("/api/subscriber-session/release")
-async def release_subscriber_session(payload: SubscriberSessionPayload) -> dict[str, Any]:
-    normalized_mobile = _normalize_bd_mobile(payload.mobile, payload.subscriberId)
-    if not normalized_mobile:
-        return {"released": True}
+async def release_subscriber_session(payload: SubscriberRevokePayload) -> dict[str, Any]:
+    return await _revoke_subscriber_session_impl(payload)
 
-    key = _subscriber_key(normalized_mobile)
-    now_ms = int(time.time() * 1000)
-    _TTL_CACHE.pop(f"bdapps_sub:{normalized_mobile}", None)
 
-    with _SESSION_STORE_LOCK:
-        store = _load_session_store_unlocked()
-        store[key] = {
-            "sessionToken": "__UNSUBSCRIBED__",
-            "status": "UNSUBSCRIBED",
-            "updatedAt": now_ms,
-        }
-        _save_session_store_unlocked(store)
+BDAPPS_RELAY_ENDPOINTS: dict[str, str] = {
+    "check": "check_subscription.php",
+    "send_otp": "send_otp.php",
+    "send-otp": "send_otp.php",
+    "verify_otp": "verify_otp.php",
+    "verify-otp": "verify_otp.php",
+    "unsubscribe": "unsubscribe.php",
+}
+BDAPPS_RELAY_TIMEOUT = 18.0
 
-    return {"released": True, "updatedAt": now_ms}
+
+class BdappsRelayRequest(BaseModel):
+    action: Literal["check", "send_otp", "send-otp", "verify_otp", "verify-otp", "unsubscribe"] | None = None
+    user_mobile: str | None = Field(default=None, max_length=32)
+    mobile: str | None = Field(default=None, max_length=32)
+    subscriberId: str | None = Field(default=None, max_length=64)
+    Otp: str | None = Field(default=None, max_length=16)
+    otp: str | None = Field(default=None, max_length=16)
+    referenceNo: str | None = Field(default=None, max_length=128)
+
+
+async def _relay_to_bdapps_php(endpoint_key: str, payload: BdappsRelayRequest) -> JSONResponse:
+    php_file = BDAPPS_RELAY_ENDPOINTS.get(endpoint_key)
+    if not php_file:
+        raise HTTPException(status_code=400, detail="Unsupported BDApps relay action.")
+
+    parsed_base = urlparse(BDAPPS_API_BASE)
+    if parsed_base.scheme != "https" or (parsed_base.hostname or "").lower() not in ALLOWED_BDAPPS_HOSTS:
+        raise HTTPException(status_code=502, detail="BDApps relay host is not allowlisted.")
+
+    if _http_client is None:
+        raise HTTPException(status_code=503, detail="HTTP relay client unavailable.")
+
+    form_fields: dict[str, str] = {}
+    if php_file in {"check_subscription.php", "send_otp.php"}:
+        user_mobile = (payload.user_mobile or payload.mobile or "").strip()
+        if user_mobile:
+            form_fields["user_mobile"] = user_mobile
+        if payload.subscriberId:
+            form_fields["subscriberId"] = payload.subscriberId.strip()
+    elif php_file == "verify_otp.php":
+        otp_val = (payload.Otp or payload.otp or "").strip()
+        ref_val = (payload.referenceNo or "").strip()
+        if otp_val:
+            form_fields["Otp"] = otp_val
+        if ref_val:
+            form_fields["referenceNo"] = ref_val
+    elif php_file == "unsubscribe.php":
+        if payload.subscriberId:
+            form_fields["subscriberId"] = payload.subscriberId.strip()
+        user_mobile = (payload.user_mobile or payload.mobile or "").strip()
+        if user_mobile:
+            form_fields["user_mobile"] = user_mobile
+
+    target_url = f"{BDAPPS_API_BASE}/{php_file}"
+    if php_file == "check_subscription.php":
+        target_url = f"{target_url}?_t={int(time.time() * 1000)}"
+
+    try:
+        resp = await _http_client.post(
+            target_url,
+            data=form_fields,
+            headers={"Accept": "application/json, text/plain, */*"},
+            timeout=BDAPPS_RELAY_TIMEOUT,
+        )
+        try:
+            body = resp.json()
+            if isinstance(body, dict):
+                return JSONResponse(status_code=resp.status_code, content=body)
+        except Exception:
+            pass
+        return JSONResponse(
+            status_code=resp.status_code if resp.status_code >= 400 else 502,
+            content={
+                "success": False,
+                "error": "BDApps PHP relay returned an invalid response.",
+            },
+        )
+    except Exception as exc:
+        logger.warning("BDApps server-to-server relay failed for %s: %s", php_file, exc)
+        return JSONResponse(
+            status_code=502,
+            content={
+                "success": False,
+                "error": "বিডিঅ্যাপস গেটওয়ে সাময়িকভাবে সাড়া দিচ্ছে না। কিছুক্ষণ পর আবার চেষ্টা করুন।",
+            },
+        )
+
+
+@app.post("/api/bdapps/check")
+async def relay_bdapps_check(payload: BdappsRelayRequest) -> JSONResponse:
+    return await _relay_to_bdapps_php("check", payload)
+
+
+@app.post("/api/bdapps/send-otp")
+async def relay_bdapps_send_otp(payload: BdappsRelayRequest) -> JSONResponse:
+    return await _relay_to_bdapps_php("send_otp", payload)
+
+
+@app.post("/api/bdapps/verify-otp")
+async def relay_bdapps_verify_otp(payload: BdappsRelayRequest) -> JSONResponse:
+    return await _relay_to_bdapps_php("verify_otp", payload)
+
+
+@app.post("/api/bdapps/unsubscribe")
+async def relay_bdapps_unsubscribe(payload: BdappsRelayRequest) -> JSONResponse:
+    return await _relay_to_bdapps_php("unsubscribe", payload)
+
+
+@app.post("/api/bdapps/proxy")
+async def relay_bdapps_proxy(payload: BdappsRelayRequest) -> JSONResponse:
+    if not payload.action:
+        raise HTTPException(status_code=422, detail="Missing BDApps proxy action.")
+    return await _relay_to_bdapps_php(payload.action, payload)
 
 
 @app.post("/api/contact")

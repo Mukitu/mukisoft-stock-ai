@@ -19,12 +19,15 @@ from typing import Any, Mapping
 
 FREE_QUOTA_LIMIT = 2
 QUOTA_WINDOW_SECONDS = 86_400  # 24 hours
+SESSION_TTL_MS = 30 * 24 * 3600 * 1000  # 30 days
 
 BASE_DIR = Path(__file__).resolve().parent
 QUOTA_DB_PATH = BASE_DIR / "free_quota.db"
 
 _DEVICE_HASH_RE = re.compile(r"^[a-f0-9]{16,128}$")
 _LOCK = threading.Lock()
+_SESSION_LOCK = threading.Lock()
+_SUBSCRIBER_SESSION_CACHE: dict[str, dict[str, Any]] = {}
 
 
 def _get_connection(db_path: Path = QUOTA_DB_PATH) -> sqlite3.Connection:
@@ -37,6 +40,17 @@ def _get_connection(db_path: Path = QUOTA_DB_PATH) -> sqlite3.Connection:
             quota_key TEXT PRIMARY KEY,
             window_start INTEGER NOT NULL,
             symbols_json TEXT NOT NULL,
+            updated_at INTEGER NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS subscriber_sessions (
+            subscriber_key TEXT PRIMARY KEY,
+            session_token TEXT NOT NULL,
+            status TEXT NOT NULL,
+            revoked INTEGER NOT NULL DEFAULT 0,
             updated_at INTEGER NOT NULL
         )
         """
@@ -237,3 +251,199 @@ def check_and_consume_quota(
             raise
         finally:
             conn.close()
+
+
+def _read_subscriber_session_unlocked(
+    subscriber_key: str,
+    now_ms: int,
+    db_path: Path = QUOTA_DB_PATH,
+) -> dict[str, Any] | None:
+    cached = _SUBSCRIBER_SESSION_CACHE.get(subscriber_key)
+    if isinstance(cached, dict):
+        if (now_ms - int(cached.get("updatedAt", now_ms))) < SESSION_TTL_MS:
+            return cached
+        _SUBSCRIBER_SESSION_CACHE.pop(subscriber_key, None)
+
+    conn = _get_connection(db_path)
+    try:
+        row = conn.execute(
+            "SELECT session_token, status, revoked, updated_at FROM subscriber_sessions WHERE subscriber_key = ?",
+            (subscriber_key,),
+        ).fetchone()
+        if row is None:
+            return None
+
+        session_token, status, revoked_int, updated_at = (
+            str(row[0]),
+            str(row[1]),
+            int(row[2]),
+            int(row[3]),
+        )
+        if (now_ms - updated_at) >= SESSION_TTL_MS:
+            conn.execute("DELETE FROM subscriber_sessions WHERE subscriber_key = ?", (subscriber_key,))
+            return None
+
+        record = {
+            "sessionToken": session_token,
+            "status": status,
+            "revoked": bool(revoked_int) or status == "UNSUBSCRIBED",
+            "updatedAt": updated_at,
+        }
+        _SUBSCRIBER_SESSION_CACHE[subscriber_key] = record
+        return record
+    finally:
+        conn.close()
+
+
+def _upsert_subscriber_session_unlocked(
+    subscriber_key: str,
+    session_token: str,
+    status: str,
+    revoked: bool,
+    now_ms: int,
+    db_path: Path = QUOTA_DB_PATH,
+) -> dict[str, Any]:
+    conn = _get_connection(db_path)
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute(
+            """
+            INSERT INTO subscriber_sessions (subscriber_key, session_token, status, revoked, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(subscriber_key) DO UPDATE SET
+                session_token = excluded.session_token,
+                status = excluded.status,
+                revoked = excluded.revoked,
+                updated_at = excluded.updated_at
+            """,
+            (subscriber_key, session_token, status, 1 if revoked else 0, now_ms),
+        )
+        conn.execute("COMMIT")
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise
+    finally:
+        conn.close()
+
+    record = {
+        "sessionToken": session_token,
+        "status": status,
+        "revoked": bool(revoked),
+        "updatedAt": now_ms,
+    }
+    _SUBSCRIBER_SESSION_CACHE[subscriber_key] = record
+    return record
+
+
+def claim_subscriber_session_record(
+    subscriber_key: str,
+    session_token: str,
+    now_ms: int | None = None,
+    db_path: Path = QUOTA_DB_PATH,
+) -> dict[str, Any]:
+    """Marks a subscriber key as ACTIVE with the given session token in memory & SQLite."""
+    ts_ms = int(now_ms if now_ms is not None else time.time() * 1000)
+    with _SESSION_LOCK:
+        return _upsert_subscriber_session_unlocked(
+            subscriber_key=subscriber_key,
+            session_token=session_token,
+            status="ACTIVE",
+            revoked=False,
+            now_ms=ts_ms,
+            db_path=db_path,
+        )
+
+
+def revoke_subscriber_session_record(
+    subscriber_key: str,
+    now_ms: int | None = None,
+    db_path: Path = QUOTA_DB_PATH,
+) -> dict[str, Any]:
+    """Immediately marks a subscriber key as UNSUBSCRIBED / revoked in memory & SQLite."""
+    ts_ms = int(now_ms if now_ms is not None else time.time() * 1000)
+    with _SESSION_LOCK:
+        return _upsert_subscriber_session_unlocked(
+            subscriber_key=subscriber_key,
+            session_token="__UNSUBSCRIBED__",
+            status="UNSUBSCRIBED",
+            revoked=True,
+            now_ms=ts_ms,
+            db_path=db_path,
+        )
+
+
+def verify_subscriber_session_record(
+    subscriber_key: str,
+    session_token: str,
+    now_ms: int | None = None,
+    db_path: Path = QUOTA_DB_PATH,
+) -> dict[str, Any]:
+    """Verifies whether a subscriber session token is still active and unrevoked."""
+    ts_ms = int(now_ms if now_ms is not None else time.time() * 1000)
+    with _SESSION_LOCK:
+        record = _read_subscriber_session_unlocked(subscriber_key, ts_ms, db_path=db_path)
+        if record is not None:
+            if bool(record.get("revoked")) or record.get("status") == "UNSUBSCRIBED":
+                return {
+                    "valid": False,
+                    "active": False,
+                    "subscribed": False,
+                    "revoked": True,
+                    "reason": "UNSUBSCRIBED",
+                    "updatedAt": record.get("updatedAt"),
+                }
+            stored_token = str(record.get("sessionToken") or "")
+            if stored_token and stored_token != session_token:
+                return {
+                    "valid": False,
+                    "active": False,
+                    "subscribed": True,
+                    "revoked": False,
+                    "reason": "SESSION_REPLACED",
+                    "updatedAt": record.get("updatedAt"),
+                }
+            return {
+                "valid": True,
+                "active": True,
+                "subscribed": True,
+                "revoked": False,
+                "reason": "OK",
+                "updatedAt": record.get("updatedAt"),
+            }
+
+        # First sight after cold restart: adopt the provided token so subsequent logins displace it
+        adopted = _upsert_subscriber_session_unlocked(
+            subscriber_key=subscriber_key,
+            session_token=session_token,
+            status="ACTIVE",
+            revoked=False,
+            now_ms=ts_ms,
+            db_path=db_path,
+        )
+        return {
+            "valid": True,
+            "active": True,
+            "subscribed": True,
+            "revoked": False,
+            "reason": "OK",
+            "updatedAt": adopted["updatedAt"],
+        }
+
+
+def is_subscriber_revoked(
+    subscriber_key: str,
+    within_seconds: int | None = None,
+    now_ms: int | None = None,
+    db_path: Path = QUOTA_DB_PATH,
+) -> bool:
+    """Returns True if the subscriber key is currently marked revoked/unsubscribed."""
+    ts_ms = int(now_ms if now_ms is not None else time.time() * 1000)
+    with _SESSION_LOCK:
+        record = _read_subscriber_session_unlocked(subscriber_key, ts_ms, db_path=db_path)
+        if record is None:
+            return False
+        if not (bool(record.get("revoked")) or record.get("status") == "UNSUBSCRIBED"):
+            return False
+        if within_seconds is not None:
+            return (ts_ms - int(record.get("updatedAt", 0))) <= within_seconds * 1000
+        return True

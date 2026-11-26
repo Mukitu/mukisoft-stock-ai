@@ -31,10 +31,10 @@ import {
   maskSubscriberId,
   normalizeSubscriptionStatus,
   purgeAllSubscriberState,
-  releaseSubscriberSession,
+  revokeSubscriberSession,
   saveBdappsSession,
   setBdappsToast,
-  unsubscribeBdapps,
+  unsubscribeBdappsSubscription,
   verifyActiveSubscriberSession,
 } from '../services/bdappsService';
 import { useTopPicks } from '../hooks/useMarketQueries';
@@ -139,8 +139,8 @@ export function DashboardPage() {
         }
 
         if (isUnregisteredPayload(res)) {
-          // Confirmed UNREGISTERED by check_subscription.php -> release, wipe cookies/localStorage, bounce to /
-          await releaseSubscriberSession(currentSession);
+          // Confirmed UNREGISTERED by check_subscription.php -> revoke on Render, wipe cookies/localStorage, bounce to /
+          await revokeSubscriberSession(currentSession);
           purgeAllSubscriberState({
             forceClearLock: true,
             currentSessionToken: currentSession.sessionToken,
@@ -224,10 +224,7 @@ export function DashboardPage() {
     setUnsubError(null);
     setIsUnsubscribing(true);
     try {
-      const res = await unsubscribeBdapps({
-        subscriberId: session.subscriberId,
-        userMobile: session.mobile,
-      });
+      const res = await unsubscribeBdappsSubscription(session);
       if (res.success === false && res.isSubscribed !== false) {
         setUnsubError(
           res.message ||
@@ -238,12 +235,6 @@ export function DashboardPage() {
         return;
       }
 
-      await releaseSubscriberSession(session);
-      purgeAllSubscriberState({
-        forceClearLock: true,
-        currentSessionToken: session.sessionToken,
-      });
-      setBdappsToast(UNSUBSCRIBED_TOAST_BN);
       navigate('/', { replace: true });
     } catch (err) {
       setUnsubError(
