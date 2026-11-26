@@ -72,8 +72,8 @@ def get_bd_market_session(now: dt.datetime | None = None) -> dict[str, Any]:
             "is_live": True,
             "mode": "LIVE",
             "badge": "লাইভ মার্কেট চলছে (১০:০০ AM – ২:৩০ PM BST)",
-            "headline": "এখনই ট্রেড নেওয়ার সেরা স্টকসমূহ (Live Buy Radar)",
-            "subtext": "রিয়েল-টাইম বাজার দর, ১৭-ফিচার XGBoost ML ও ২০-ইন্ডিকেটর কনসেনসাস বিশ্লেষণ",
+            "headline": "লাইভ টেকনিক্যাল বুলিশ সেটআপ রাডার (Strong Bullish Setup)",
+            "subtext": "রিয়েল-টাইম বাজার দর, ১৭-ফিচার XGBoost ML ও ২০-ইন্ডিকেটর কনসেনসাস ভিত্তিক শিক্ষামূলক পর্যবেক্ষণ",
             "bd_time": bd_now.strftime("%d %b %Y, %I:%M %p"),
         }
 
@@ -81,8 +81,8 @@ def get_bd_market_session(now: dt.datetime | None = None) -> dict[str, Any]:
         "is_live": False,
         "mode": "DAILY_LOCK",
         "badge": "৩:০০ PM ডেইলি লক • পরবর্তী সেশন সকাল ১০:০০টা BST",
-        "headline": "আগামী কার্যদিবসে বাই করার সেরা স্টকসমূহ",
-        "subtext": "সর্বশেষ ক্লোজিং ডেটা ও ২০-ইন্ডিকেটর কনসেনসাস বিশ্লেষণে বাছাইকৃত প্রকৃত Strong Buy তালিকা",
+        "headline": "আগামী কার্যদিবসের Strong Bullish Setup পর্যবেক্ষণ তালিকা",
+        "subtext": "সর্বশেষ ক্লোজিং ডেটা ও ২০-ইন্ডিকেটর কনসেনসাস বিশ্লেষণে বাছাইকৃত গবেষণামূলক তালিকা",
         "bd_time": bd_now.strftime("%d %b %Y, %I:%M %p"),
     }
 
@@ -179,7 +179,7 @@ def evaluate_20_indicator_consensus(
     """
     Unified 20-indicator quantitative consensus engine synchronized with XGBoost ML.
     Requires ML Strong Buy (signal_code == 2) AND >= 15/20 bullish indicators AND non-sideways
-    to emit 'এখনই বাই করতে পারেন (Strong Buy)'.
+    to emit 'AI টেকনিক্যাল সিগন্যাল: Strong Bullish Setup (গবেষণামূলক পর্যবেক্ষণ)'.
     """
     closes = df["close"].astype(float).tolist()
     highs = df["high"].astype(float).tolist() if "high" in df.columns else closes
@@ -291,19 +291,19 @@ def evaluate_20_indicator_consensus(
     if is_sideways:
         action_type = "SIDEWAYS"
         signal_code = 1
-        badge_bn = "সাইডওয়ে মার্কেট — এড়িয়ে চলুন (Sideways)"
+        badge_bn = "AI টেকনিক্যাল সিগন্যাল: Sideways / নিরপেক্ষ (গবেষণামূলক পর্যবেক্ষণ)"
     elif ml_signal_code == 2 and bull_count >= MIN_STRONG_BUY_VOTES:
         action_type = "BUY"
         signal_code = 2
-        badge_bn = "এখনই বাই করতে পারেন (Strong Buy)"
+        badge_bn = "AI টেকনিক্যাল সিগন্যাল: Strong Bullish Setup (গবেষণামূলক পর্যবেক্ষণ)"
     elif ml_signal_code == 0 or bear_count >= 12:
         action_type = "SELL"
         signal_code = 0
-        badge_bn = "বিক্রি বা সতর্ক থাকুন (Sell)"
+        badge_bn = "AI টেকনিক্যাল সিগন্যাল: Bearish / উচ্চ-ঝুঁকি সংকেত (সতর্কতামূলক পর্যবেক্ষণ)"
     else:
         action_type = "HOLD"
         signal_code = 1
-        badge_bn = "হোল্ড / পর্যবেক্ষণ করুন (Hold)"
+        badge_bn = "AI টেকনিক্যাল সিগন্যাল: Neutral / Hold জোন (গবেষণামূলক পর্যবেক্ষণ)"
 
     return {
         "action_type": action_type,

@@ -30,12 +30,12 @@ export function Footer() {
             <Link to="/contact" className="hover:text-blue-700 transition-colors">
               যোগাযোগ
             </Link>
-            <Link to="/disclaimer" className="text-blue-700 hover:underline font-semibold">
-              বিনিয়োগ ঝুঁকি সতর্কতা ও নীতিমালা
+            <Link to="/risk-disclosure" className="text-blue-700 hover:underline font-semibold">
+              বিনিয়োগ ঝুঁকি ও নীতিমালা
             </Link>
           </div>
           <p className="text-[11px] text-slate-400">
-            সতর্কীকরণ: এটি একটি ডেটা-ভিত্তিক কোয়ান্টিটেটিভ রিসার্চ টুল, কোনো সরাসরি BSEC নিবন্ধিত আর্থিক পরামর্শ নয়।
+            সতর্কীকরণ (Self-Risk): MukiSoft Stock AI কোনো BSEC-নিবন্ধিত ব্রোকার বা আর্থিক উপদেষ্টা নয়; এটি কেবল শিক্ষামূলক ও ডেটা-ভিত্তিক প্রযুক্তিগত বিশ্লেষণ প্ল্যাটফর্ম।
           </p>
         </div>
       </div>

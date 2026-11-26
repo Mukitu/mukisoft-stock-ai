@@ -18,6 +18,7 @@ import { getBDMarketSession } from '../utils/bdMarketSession';
 import { BdappsSubscriptionCard } from '../components/bdapps/BdappsSubscriptionCard';
 import { FreeQuotaPaywallModal } from '../components/bdapps/FreeQuotaPaywallModal';
 import { FreeQuotaBanner } from '../components/common/FreeQuotaBanner';
+import { SelfRiskDisclaimerBanner } from '../components/common/SelfRiskDisclaimerBanner';
 import { useFreeQuota } from '../hooks/useFreeQuota';
 import { consumeBdappsToast } from '../services/bdappsService';
 import { LIVE_FEED_WAITING_BN } from '../services/apiClient';
@@ -27,7 +28,7 @@ import {
 } from '../utils/quantConsensus';
 
 const UNLOCK_PROMPT_BN =
-  'বাকি ৫টি Strong Buy স্টক ও পূর্ণ AI সিগন্যাল আনলক করতে আপনার Robi & Cirkle নম্বর দিয়ে সাবস্ক্রাইব করুন';
+  'বাকি ৫টি Strong Bullish Setup পর্যবেক্ষণ ও পূর্ণ AI বিশ্লেষণ আনলক করতে আপনার Robi & Cirkle নম্বর দিয়ে সাবস্ক্রাইব করুন';
 
 export function HomePage() {
   const navigate = useNavigate();
@@ -167,12 +168,12 @@ export function HomePage() {
             </div>
 
             <h1 className="text-2xl sm:text-4xl lg:text-5xl font-extrabold text-slate-900 leading-[1.18] tracking-tight max-w-2xl">
-              অনুমানে নয়, <span className="text-blue-700">তথ্য ও MukiSoft AI-এর বিশ্লেষণে</span> বিনিয়োগ করুন
+              অনুমানে নয়, <span className="text-blue-700">তথ্য ও MukiSoft AI-এর বিশ্লেষণে</span> মার্কেট বুঝুন
             </h1>
 
             <p className="hidden sm:block text-slate-600 text-sm sm:text-base lg:text-lg leading-relaxed max-w-2xl">
-              ঢাকা ও চট্টগ্রাম স্টক এক্সচেঞ্জের যেকোনো শেয়ার কেনার আগে ১৭-ফিচার XGBoost মডেল এবং ২০-ইন্ডিকেটর
-              কনসেনসাস ইঞ্জিন দিয়ে যাচাই করুন। পরিষ্কার সাপোর্ট, রেজিস্ট্যান্স ও সহজ বাংলা ট্রেডিং গাইডলাইন পান মুহূর্তেই।
+              ঢাকা ও চট্টগ্রাম স্টক এক্সচেঞ্জের যেকোনো শেয়ারের ১৭-ফিচার XGBoost মডেল এবং ২০-ইন্ডিকেটর
+              কনসেনসাস ইঞ্জিন দিয়ে গাণিতিক বিশ্লেষণ দেখুন। পরিষ্কার সাপোর্ট, রেজিস্ট্যান্স ও সহজ বাংলা ডেটা রিপোর্ট পান মুহূর্তেই।
             </p>
           </div>
 
@@ -187,7 +188,7 @@ export function HomePage() {
           {/* Block 3: Quick Stock Search & Trust Metrics (order-3 below subscription card on mobile, bottom-left on lg desktop) */}
           <div className="order-3 lg:col-span-7 lg:col-start-1 lg:row-start-2 flex flex-col justify-start space-y-5 min-w-0 pt-1 lg:pt-0">
             <p className="sm:hidden text-slate-600 text-xs leading-relaxed">
-              DSE ও CSE-এর যেকোনো শেয়ার কেনার আগে ১৭-ফিচার XGBoost মডেল ও ২০-ইন্ডিকেটর কনসেনসাস দিয়ে যাচাই করুন।
+              DSE ও CSE-এর যেকোনো শেয়ারের ১৭-ফিচার XGBoost মডেল ও ২০-ইন্ডিকেটর কনসেনসাস বিশ্লেষণ দেখুন।
             </p>
 
             {/* Quick Search Form */}
@@ -279,12 +280,15 @@ export function HomePage() {
             </div>
           </div>
 
+          {/* Mandatory Self-Risk Disclaimer Banner above Live Radar */}
+          <SelfRiskDisclaimerBanner className="mb-6" />
+
           {!isSubscribed && picks.length > 1 && (
             <div className="mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white border border-blue-200/90 rounded-xl px-4 py-3 text-xs sm:text-sm">
               <div className="flex items-start sm:items-center gap-2 text-slate-700 min-w-0">
                 <Lock className="w-4 h-4 text-blue-700 shrink-0 mt-0.5 sm:mt-0" />
                 <span>
-                  প্রথম Strong Buy স্টকটি <strong className="text-emerald-700">সম্পূর্ণ ফ্রি</strong>। বাকি ৫টি প্রিমিয়াম Strong Buy স্টক আনলক করতে Robi &amp; Cirkle নম্বর দিয়ে সাবস্ক্রাইব করুন।
+                  প্রথম Strong Bullish Setup পর্যবেক্ষণটি <strong className="text-emerald-700">সম্পূর্ণ ফ্রি</strong>। বাকি ৫টি বিশ্লেষণ আনলক করতে Robi &amp; Cirkle নম্বর দিয়ে সাবস্ক্রাইব করুন।
                 </span>
               </div>
               <button
@@ -316,7 +320,7 @@ export function HomePage() {
                   )}
                   <p className="text-sm font-semibold text-slate-800">{LIVE_FEED_WAITING_BN}</p>
                   <p className="text-xs text-slate-500 max-w-lg mx-auto">
-                    কোনো ডেমো বা অনুমানভিত্তিক স্টক দেখানো হয় না। লাইভ সার্ভার প্রস্তুত হলেই প্রকৃত ১৫–২০/২০ Strong Buy স্টক তালিকা স্বয়ংক্রিয়ভাবে লোড হবে।
+                    কোনো ডেমো বা অনুমানভিত্তিক স্টক দেখানো হয় না। লাইভ সার্ভার প্রস্তুত হলেই প্রকৃত ১৫–২০/২০ Strong Bullish Setup তালিকা স্বয়ংক্রিয়ভাবে লোড হবে।
                   </p>
                   <div className="flex flex-wrap items-center justify-center gap-3 pt-1">
                     <button
@@ -340,10 +344,10 @@ export function HomePage() {
               ) : (
                 <>
                   <p className="text-sm font-semibold text-slate-800">
-                    বর্তমান রিয়েল-টাইম স্ক্যানে কোনো কোম্পানি একসাথে ML Strong Buy এবং ১৫/২০+ ইতিবাচক সূচকের কঠোর শর্ত পূরণ করেনি।
+                    বর্তমান রিয়েল-টাইম স্ক্যানে কোনো কোম্পানি একসাথে ML Strong Bullish Setup এবং ১৫/২০+ ইতিবাচক সূচকের কঠোর শর্ত পূরণ করেনি।
                   </p>
                   <p className="text-xs text-slate-500">
-                    আমরা কখনোই Hold বা Sideways স্টককে জোরপূর্বক Strong Buy হিসেবে দেখাই না।
+                    আমরা কখনোই Hold বা Sideways স্টককে জোরপূর্বক Strong Bullish Setup হিসেবে দেখাই না।
                   </p>
                   <Link
                     to="/analyzer"
@@ -375,7 +379,7 @@ export function HomePage() {
                           handleLockedCardClick();
                         }
                       }}
-                      aria-label={`প্রিমিয়াম Strong Buy স্টক #${idx + 1} আনলক করতে সাবস্ক্রাইব করুন`}
+                      aria-label={`প্রিমিয়াম Strong Bullish Setup পর্যবেক্ষণ #${idx + 1} আনলক করতে সাবস্ক্রাইব করুন`}
                       className="relative overflow-hidden bg-white border border-slate-200 hover:border-blue-600/70 rounded-xl p-5 transition-all flex flex-col justify-between w-full min-w-0 cursor-pointer group focus:outline-none focus:ring-2 focus:ring-blue-700"
                     >
                       {/* Redacted Blurred Underlying Placeholder (Zero Fake Prices) */}
@@ -403,11 +407,11 @@ export function HomePage() {
 
                         <div className="grid grid-cols-2 gap-3 pb-4 border-b border-slate-100 text-xs">
                           <div>
-                            <div className="text-slate-500">টার্গেট প্রাইস</div>
+                            <div className="text-slate-500">মডেল রেফারেন্স টার্গেট</div>
                             <div className="font-bold text-emerald-700 font-mono-num text-sm mt-0.5">৳ ••••</div>
                           </div>
                           <div>
-                            <div className="text-slate-500">নিরাপদ স্টপ-লস</div>
+                            <div className="text-slate-500">ঝুঁকি রেফারেন্স (স্টপ-লস)</div>
                             <div className="font-bold text-rose-700 font-mono-num text-sm mt-0.5">৳ ••••</div>
                           </div>
                         </div>
@@ -431,7 +435,7 @@ export function HomePage() {
                             {isLowTier ? 'Low-Cap Active' : 'Mid & Large-Cap'} · #{idx + 1}
                           </div>
                           <p className="text-xs sm:text-[13px] font-bold text-slate-900 leading-snug">
-                            🔒 প্রিমিয়াম Strong Buy স্টক • আনলক করতে সাবস্ক্রাইব করুন
+                            🔒 প্রিমিয়াম Strong Bullish Setup পর্যবেক্ষণ • আনলক করতে সাবস্ক্রাইব করুন
                           </p>
                         </div>
 
@@ -499,13 +503,13 @@ export function HomePage() {
 
                       <div className="grid grid-cols-2 gap-3 pb-4 border-b border-slate-100 text-xs">
                         <div>
-                          <div className="text-slate-500">টার্গেট প্রাইস</div>
+                          <div className="text-slate-500">মডেল রেফারেন্স টার্গেট</div>
                           <div className="font-bold text-emerald-700 font-mono-num text-sm mt-0.5">
                             ৳ {item.target_price.toFixed(2)}
                           </div>
                         </div>
                         <div>
-                          <div className="text-slate-500">নিরাপদ স্টপ-লস</div>
+                          <div className="text-slate-500">ঝুঁকি রেফারেন্স (স্টপ-লস)</div>
                           <div className="font-bold text-rose-700 font-mono-num text-sm mt-0.5">
                             ৳ {item.stop_loss.toFixed(2)}
                           </div>
@@ -544,7 +548,7 @@ export function HomePage() {
               কেন MukiSoft AI বাংলাদেশের বিনিয়োগকারীদের প্রথম পছন্দ?
             </h2>
             <p className="text-slate-600 text-sm">
-              আবেগ বা গুজব নয়—সত্যিকারের ঐতিহাসিক OHLCV ডেটা, XGBoost ML এবং ২০-ইন্ডিকেটর কনসেনসাস ভিত্তিক সিদ্ধান্ত।
+              আবেগ বা গুজব নয়—সত্যিকারের ঐতিহাসিক OHLCV ডেটা, XGBoost ML এবং ২০-ইন্ডিকেটর কনসেনসাস ভিত্তিক শিক্ষামূলক বিশ্লেষণ।
             </p>
           </div>
 
@@ -559,9 +563,9 @@ export function HomePage() {
 
             <div className="bg-slate-50 border border-slate-200 p-5 sm:p-6 rounded-xl space-y-3 min-w-0">
               <ShieldCheck className="w-6 h-6 text-emerald-700" />
-              <h3 className="text-base font-bold text-slate-900">ইউনিফায়েড টার্গেট ও স্টপ-লস</h3>
+              <h3 className="text-base font-bold text-slate-900">রেফারেন্স টার্গেট ও স্টপ-লস লেভেল</h3>
               <p className="text-slate-600 text-sm leading-relaxed">
-                ২০-দিনের সাপোর্ট-রেজিস্ট্যান্স ও ATR ভোলাটিলিটি বিশ্লেষণ করে প্রতিটি শেয়ারের প্রফিট লক্ষ্যমাত্রা ও স্টপ-লস নির্ধারণ করে।
+                ২০-দিনের সাপোর্ট-রেজিস্ট্যান্স ও ATR ভোলাটিলিটি বিশ্লেষণ করে প্রতিটি শেয়ারের গাণিতিক রেফারেন্স টার্গেট ও ঝুঁকি লেভেল প্রদর্শন করে।
               </p>
             </div>
 
@@ -583,10 +587,10 @@ export function HomePage() {
             <div className="max-w-2xl space-y-2 min-w-0">
               <div className="text-xs font-semibold text-sky-400">MukiSoft Technology Quantitative Engine</div>
               <h2 className="text-xl sm:text-3xl font-bold text-white">
-                আপনার DSE ও CSE বিনিয়োগকে ডেটা-চালিত করুন আজই
+                আপনার DSE ও CSE মার্কেট বিশ্লেষণকে ডেটা-চালিত করুন আজই
               </h2>
               <p className="text-slate-300 text-sm leading-relaxed">
-                কোনো পাসওয়ার্ড ছাড়াই আপনার Robi &amp; Cirkle নম্বর দিয়ে যুক্ত হন এবং DSE ও CSE শেয়ারের ML সিগন্যাল ও ক্যান্ডেলস্টিক চার্ট বিশ্লেষণ করুন।
+                কোনো পাসওয়ার্ড ছাড়াই আপনার Robi &amp; Cirkle নম্বর দিয়ে যুক্ত হন এবং DSE ও CSE শেয়ারের টেকনিক্যাল সিগন্যাল ও ক্যান্ডেলস্টিক চার্ট পর্যবেক্ষণ করুন।
               </p>
             </div>
             <div className="flex flex-wrap gap-3 shrink-0 w-full md:w-auto">

@@ -35,6 +35,7 @@ export function App() {
             <Route path="/about" element={<AboutPage />} />
             <Route path="/contact" element={<ContactPage />} />
             <Route path="/disclaimer" element={<DisclaimerPage />} />
+            <Route path="/risk-disclosure" element={<DisclaimerPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
           <Footer />

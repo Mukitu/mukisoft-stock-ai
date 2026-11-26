@@ -40,10 +40,10 @@ export function getBDMarketSession(baseDate: Date = new Date()): MarketSessionIn
     return {
       is_live: true,
       mode: 'LIVE',
-      cardTiming: 'এখনই এন্ট্রি জোন (Live)',
+      cardTiming: 'রিয়েল-টাইম টেকনিক্যাল পর্যবেক্ষণ (Live)',
       badge: 'লাইভ মার্কেট সেশন চলছে (১০:০০ AM – ২:৩০ PM BST)',
-      headline: 'এখনই ট্রেড নেওয়ার সেরা স্টকসমূহ (Live Buy Radar)',
-      subtext: 'রিয়েল-টাইম বাজার দর, ১৭-ফিচার XGBoost ML এবং ২০-ইন্ডিকেটর কনসেনসাস বিশ্লেষণ',
+      headline: 'লাইভ AI টেকনিক্যাল র‍্যাডার: Strong Bullish Setup পর্যবেক্ষণ',
+      subtext: 'রিয়েল-টাইম বাজার দর, ১৭-ফিচার XGBoost ML ও ২০-ইন্ডিকেটর ভিত্তিক শিক্ষামূলক টেকনিক্যাল বিশ্লেষণ',
       bd_time: bdTime,
     };
   }
@@ -52,10 +52,10 @@ export function getBDMarketSession(baseDate: Date = new Date()): MarketSessionIn
     return {
       is_live: false,
       mode: 'PRE_MARKET',
-      cardTiming: 'আজ সকাল ১০:০০টায় এন্ট্রি',
+      cardTiming: 'প্রি-মার্কেট ডেটা পর্যবেক্ষণ',
       badge: 'প্রি-মার্কেট প্রস্তুতি · আজ সকাল ১০:০০টায় লেনদেন শুরু',
-      headline: 'আজ সকাল ১০:০০টায় বাই করার সেরা স্টকসমূহ',
-      subtext: 'সর্বশেষ ৩:০০ PM BST ক্লোজিং ডেটা বিশ্লেষণ করে আজকের ওপেনিং সেশনের বাছাইকৃত তালিকা',
+      headline: 'প্রি-মার্কেট AI র‍্যাডার: Strong Bullish Setup পর্যবেক্ষণ',
+      subtext: 'সর্বশেষ ৩:০০ PM BST ক্লোজিং ডেটা ও ২০-ইন্ডিকেটর ভিত্তিক গবেষণামূলক টেকনিক্যাল তালিকা',
       bd_time: bdTime,
     };
   }
@@ -64,10 +64,10 @@ export function getBDMarketSession(baseDate: Date = new Date()): MarketSessionIn
     return {
       is_live: false,
       mode: 'WEEKEND',
-      cardTiming: 'আগামী রবিবার সকাল ১০:০০টায় এন্ট্রি',
+      cardTiming: 'সাপ্তাহিক ক্লোজিং ডেটা পর্যবেক্ষণ',
       badge: 'সাপ্তাহিক মার্কেট বন্ধ · পরবর্তী সেশন রবিবার সকাল ১০:০০টা',
-      headline: 'আগামী রবিবার সকাল ১০:০০টায় বাই করার সেরা স্টকসমূহ',
-      subtext: 'সাপ্তাহিক ক্লোজিং ডেটা ও ২০-ইন্ডিকেটর বিশ্লেষণে বাছাইকৃত Strong Buy কোম্পানি',
+      headline: 'সাপ্তাহিক AI র‍্যাডার: Strong Bullish Setup পর্যবেক্ষণ',
+      subtext: 'সাপ্তাহিক ক্লোজিং ডেটা ও ২০-ইন্ডিকেটর বিশ্লেষণে চিহ্নিত শিক্ষামূলক টেকনিক্যাল তালিকা',
       bd_time: bdTime,
     };
   }
@@ -75,10 +75,10 @@ export function getBDMarketSession(baseDate: Date = new Date()): MarketSessionIn
   return {
     is_live: false,
     mode: 'DAILY_LOCK',
-    cardTiming: 'আগামীকাল সকাল ১০:০০টায় এন্ট্রি',
+    cardTiming: 'সর্বশেষ ৩:০০ PM BST ক্লোজিং বিশ্লেষণ',
     badge: '৩:০০ PM BST ডেইলি লক · আগামীকাল সকাল ১০:০০টায় পরবর্তী সেশন',
-    headline: 'আগামীকাল সকাল ১০:০০টায় বাই করার সেরা স্টকসমূহ',
-    subtext: 'আজকের ক্লোজিং ডেটা ও ২০-ইন্ডিকেটর কনসেনসাস বিশ্লেষণে বাছাইকৃত তালিকা',
+    headline: 'ডেইলি AI র‍্যাডার: Strong Bullish Setup পর্যবেক্ষণ',
+    subtext: 'আজকের ক্লোজিং ডেটা ও ২০-ইন্ডিকেটর কনসেনসাস ভিত্তিক গবেষণামূলক টেকনিক্যাল তালিকা',
     bd_time: bdTime,
   };
 }

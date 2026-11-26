@@ -351,18 +351,19 @@ async def generate_humanized_advice(result: dict[str, Any], extra_info: str = ""
 
     fallback = (
         f"বর্তমানে {symbol} ({exchange}) শেয়ারটির বাজার দর ৳{price:.2f} এবং ২০টি সূচকের মধ্যে "
-        f"{bull_votes}টি ইতিবাচক সংকেত দিচ্ছে (কনফিডেন্স {confidence:.1f}%)। "
-        f"টার্গেট প্রাইস ৳{target:.2f} এবং নিরাপদ স্টপ-লস ৳{stop_loss:.2f} বিবেচনায় রেখে ঝুঁকি ব্যবস্থাপনা করুন।"
+        f"{bull_votes}টি ইতিবাচক সংকেত নির্দেশ করছে (মডেল কনফিডেন্স {confidence:.1f}%)। "
+        f"গাণিতিক রেফারেন্স রেজিস্ট্যান্স ৳{target:.2f} এবং সাপোর্ট / ঝুঁকি রেফারেন্স ৳{stop_loss:.2f} কেবল তথ্য ও গবেষণামূলক পর্যবেক্ষণের জন্য প্রদর্শিত হয়েছে।"
     )
     if not AI_API_KEY:
         return fallback
 
     prompt = (
-        "You are a senior Bangladesh Stock Exchange quantitative analyst. "
-        "Write a concise 3-sentence plain Bangla (বাংলা লিপি) market observation with no HTML, markdown, or headings.\n"
+        "You are a Bangladesh Stock Exchange educational data research assistant. "
+        "Write a concise 3-sentence plain Bangla (বাংলা লিপি) objective technical observation with NO HTML, markdown, headings, or imperative buy/sell commands. "
+        "Never tell the user to buy or sell; frame target and stop-loss strictly as mathematical technical reference levels for educational analysis.\n"
         f"Stock: {symbol} ({exchange}), Price: {price} BDT, RSI(14): {rsi}, "
-        f"Consensus: {signal} ({bull_votes}/20 bullish, ML confidence {confidence}%), "
-        f"Target: {target} BDT, Stop-Loss: {stop_loss} BDT. Context: {extra_info}"
+        f"Technical Signal: {signal} ({bull_votes}/20 bullish indicators, ML confidence {confidence}%), "
+        f"Reference Resistance: {target} BDT, Reference Support: {stop_loss} BDT. Context: {extra_info}"
     )
     try:
         return await call_groq_chat([{"role": "user", "content": prompt}], max_tokens=220, temperature=0.45)

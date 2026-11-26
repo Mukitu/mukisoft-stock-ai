@@ -705,7 +705,7 @@ export function AnalyzerPage() {
               আজকের ২টি ফ্রি বিশ্লেষণ শেষ হয়েছে!
             </h2>
             <p className="text-xs sm:text-sm text-slate-600 max-w-lg mx-auto leading-relaxed">
-              অপেক্ষা না করে এখনই আনলিমিটেড DSE ও CSE স্টক AI বিশ্লেষণ ও ৬টি Strong Buy সিগন্যাল আনলক করতে আপনার Robi &amp; Cirkle নম্বর দিয়ে সাবস্ক্রাইব করুন।
+              অপেক্ষা না করে এখনই আনলিমিটেড DSE ও CSE স্টক AI বিশ্লেষণ ও ৬টি Strong Bullish Setup পর্যবেক্ষণ আনলক করতে আপনার Robi &amp; Cirkle নম্বর দিয়ে সাবস্ক্রাইব করুন।
             </p>
           </div>
           <button
@@ -813,7 +813,7 @@ export function AnalyzerPage() {
               <div className="text-[11px] font-semibold text-slate-700 mt-1.5 leading-snug">
                 {currentAnalysis.action_type === 'BUY'
                   ? formatStrongBuyConsensusLine(currentAnalysis.bull_votes)
-                  : `২০টি সূচকের মধ্যে ${toBanglaDigits(currentAnalysis.bull_votes)}টি ইতিবাচক সিদ্ধান্ত`}
+                  : `২০টি সূচকের মধ্যে ${toBanglaDigits(currentAnalysis.bull_votes)}টি ইতিবাচক সংকেত • শুধুমাত্র তথ্য ও বিশ্লেষণের জন্য`}
               </div>
               <div className="text-[11px] text-slate-500 mt-1 font-mono-num">
                 কনফিডেন্স: <strong className="text-slate-900">{currentAnalysis.confidence.toFixed(1)}%</strong>
@@ -821,7 +821,7 @@ export function AnalyzerPage() {
             </div>
 
             <div className="bg-white border border-slate-200 p-5 rounded-xl">
-              <div className="text-xs text-slate-500">সম্ভাব্য টার্গেট প্রাইস (R1)</div>
+              <div className="text-xs text-slate-500">মডেল রেফারেন্স টার্গেট (R1)</div>
               <div className="text-3xl font-bold text-emerald-700 font-mono-num mt-2">
                 ৳ {currentAnalysis.target_price.toFixed(2)}
               </div>
@@ -831,7 +831,7 @@ export function AnalyzerPage() {
             </div>
 
             <div className="bg-white border border-slate-200 p-5 rounded-xl">
-              <div className="text-xs text-slate-500">নিরাপদ স্টপ-লস (S1)</div>
+              <div className="text-xs text-slate-500">ঝুঁকি রেফারেন্স / স্টপ-লস (S1)</div>
               <div className="text-3xl font-bold text-rose-700 font-mono-num mt-2">
                 ৳ {currentAnalysis.stop_loss.toFixed(2)}
               </div>

@@ -56,9 +56,14 @@ export function BdappsSubscriptionCard({
   const [isResending, setIsResending] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
+  const [consentAccepted, setConsentAccepted] = useState(false);
+  const [consentWarning, setConsentWarning] = useState<string | null>(null);
 
   const otpInputRef = useRef<HTMLInputElement | null>(null);
   const redirectTimerRef = useRef<number | null>(null);
+
+  const CONSENT_REQUIRED_WARNING_BN =
+    "এগিয়ে যেতে অনুগ্রহ করে উপরের 'I Agree' ঝুঁকি ও নীতিমালা সম্মতি বক্সে টিক দিন।";
 
   // Auto-redirect returning verified Robi & Cirkle subscribers directly to /dashboard
   // (when rendered inline on Home; inside Paywall Modal we invoke onSubscribed directly)
@@ -112,6 +117,12 @@ export function BdappsSubscriptionCard({
     setErrorMsg(null);
     setStatusMsg(null);
 
+    if (!consentAccepted) {
+      setConsentWarning(CONSENT_REQUIRED_WARNING_BN);
+      return;
+    }
+    setConsentWarning(null);
+
     const cleaned = sanitizeBdLocalDigits(localDigits);
     setLocalDigits(cleaned);
 
@@ -124,11 +135,21 @@ export function BdappsSubscriptionCard({
     setIsSubmitting(true);
 
     try {
+      const consentRecord = {
+        consentAccepted: true,
+        consentTimestamp: new Date().toISOString(),
+      };
+
       // 1. Proactive Pre-check: check_subscription.php before sending OTP
       try {
         const precheck = await checkBdappsSubscription(fullMobile);
         if (isActiveSubscriptionPayload(precheck)) {
-          const session = buildActiveSessionFromResponse(fullMobile, precheck, 'check_subscription');
+          const session = buildActiveSessionFromResponse(
+            fullMobile,
+            precheck,
+            'check_subscription',
+            consentRecord
+          );
           saveBdappsSession(session);
           clearPendingOtp();
           setStep('verified');
@@ -158,7 +179,12 @@ export function BdappsSubscriptionCard({
         String(otpRes.statusCode || '').toUpperCase() === 'E1351' ||
         isActiveSubscriptionPayload(otpRes)
       ) {
-        const session = buildActiveSessionFromResponse(fullMobile, otpRes, 'send_otp');
+        const session = buildActiveSessionFromResponse(
+          fullMobile,
+          otpRes,
+          'send_otp',
+          consentRecord
+        );
         saveBdappsSession(session);
         clearPendingOtp();
         setStep('verified');
@@ -222,7 +248,10 @@ export function BdappsSubscriptionCard({
         String(otpRes.statusCode || '').toUpperCase() === 'E1351' ||
         isActiveSubscriptionPayload(otpRes)
       ) {
-        const session = buildActiveSessionFromResponse(activeMobile, otpRes, 'send_otp');
+        const session = buildActiveSessionFromResponse(activeMobile, otpRes, 'send_otp', {
+          consentAccepted: true,
+          consentTimestamp: new Date().toISOString(),
+        });
         saveBdappsSession(session);
         clearPendingOtp();
         if (onSubscribed) {
@@ -263,6 +292,12 @@ export function BdappsSubscriptionCard({
     setErrorMsg(null);
     setStatusMsg(null);
 
+    if (!consentAccepted) {
+      setConsentWarning(CONSENT_REQUIRED_WARNING_BN);
+      return;
+    }
+    setConsentWarning(null);
+
     const cleanOtp = otpCode.replace(/\D/g, '').slice(0, 6);
     setOtpCode(cleanOtp);
 
@@ -284,7 +319,10 @@ export function BdappsSubscriptionCard({
       const verifyRes = await verifyBdappsOtp(cleanOtp, referenceNo);
 
       if (isActiveSubscriptionPayload(verifyRes)) {
-        const session = buildActiveSessionFromResponse(activeMobile, verifyRes, 'verify_otp');
+        const session = buildActiveSessionFromResponse(activeMobile, verifyRes, 'verify_otp', {
+          consentAccepted: true,
+          consentTimestamp: new Date().toISOString(),
+        });
         // Save session synchronously BEFORE navigation/unlock
         saveBdappsSession(session);
         clearPendingOtp();
@@ -331,6 +369,54 @@ export function BdappsSubscriptionCard({
 
   const mobileInputId = embeddedInModal ? 'bdapps-modal-mobile-input' : 'bdapps-mobile-input';
   const otpInputId = embeddedInModal ? 'bdapps-modal-otp-input' : 'bdapps-otp-input';
+  const consentCheckboxId = embeddedInModal ? 'bdapps-modal-consent-checkbox' : 'bdapps-consent-checkbox';
+
+  const renderConsentBlock = () => (
+    <div className="space-y-2 w-full min-w-0">
+      <label
+        htmlFor={consentCheckboxId}
+        className={`flex items-start gap-2.5 rounded-xl border p-3 text-[11px] sm:text-xs leading-relaxed cursor-pointer transition-colors ${
+          consentWarning && !consentAccepted
+            ? 'border-rose-400 bg-rose-50/70 text-slate-800'
+            : consentAccepted
+              ? 'border-emerald-300 bg-emerald-50/50 text-slate-800'
+              : 'border-slate-300 bg-white text-slate-700 hover:border-blue-400'
+        }`}
+      >
+        <input
+          id={consentCheckboxId}
+          type="checkbox"
+          checked={consentAccepted}
+          onChange={(e) => {
+            setConsentAccepted(e.target.checked);
+            if (e.target.checked) setConsentWarning(null);
+          }}
+          className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-400 text-blue-700 focus:ring-blue-600 cursor-pointer"
+        />
+        <span className="min-w-0 break-words">
+          <strong className="text-slate-900">I Agree:</strong> আমি সম্মত হচ্ছি যে, MukiSoft Stock AI শুধুমাত্র একটি শিক্ষামূলক ও ডেটা-ভিত্তিক প্রযুক্তিগত বিশ্লেষণ প্ল্যাটফর্ম (কোনো আর্থিক বা বিনিয়োগ উপদেষ্টা নয়)। শেয়ার বাজারে যেকোনো বিনিয়োগ, লাভ বা ক্ষতির সম্পূর্ণ দায়ভার ও ঝুঁকি (Self-Risk) একান্তই আমার নিজের, এবং এ বিষয়ে MukiSoft Technology-র কোনো আইনি বাধ্যবাধকতা থাকবে না।{' '}
+          <a
+            href="/risk-disclosure"
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            className="font-bold text-blue-700 hover:text-blue-800 underline underline-offset-2"
+          >
+            বিনিয়োগ ঝুঁকি ও নীতিমালা
+          </a>
+        </span>
+      </label>
+
+      {consentWarning && !consentAccepted && (
+        <div
+          role="alert"
+          className="rounded-lg border border-rose-300 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 leading-relaxed"
+        >
+          {consentWarning}
+        </div>
+      )}
+    </div>
+  );
 
   return (
     <div
@@ -360,7 +446,7 @@ export function BdappsSubscriptionCard({
               </span>
             </h2>
             <p className="text-xs sm:text-[13px] text-slate-600 leading-relaxed">
-              আপনার Robi &amp; Cirkle মোবাইল নম্বর দিন, OTP আসবে সেই নম্বরে। ভেরিফাই ও অ্যাক্টিভেট করলেই আপনার ড্যাশবোর্ড ও সকল প্রিমিয়াম AI সিগন্যাল আনলক হয়ে যাবে।
+              আপনার Robi &amp; Cirkle মোবাইল নম্বর দিন, OTP আসবে সেই নম্বরে। ভেরিফাই ও অ্যাক্টিভেট করলেই আপনার ড্যাশবোর্ড ও সকল প্রিমিয়াম AI টেকনিক্যাল বিশ্লেষণ টুল আনলক হয়ে যাবে।
             </p>
           </div>
 
@@ -410,6 +496,8 @@ export function BdappsSubscriptionCard({
               </p>
             </div>
 
+            {renderConsentBlock()}
+
             {errorMsg && (
               <div
                 role="alert"
@@ -422,7 +510,12 @@ export function BdappsSubscriptionCard({
             <button
               type="submit"
               disabled={isSubmitting}
-              className="w-full inline-flex items-center justify-center gap-2 bg-blue-700 hover:bg-blue-800 disabled:opacity-65 text-white font-bold text-sm px-5 py-3.5 rounded-xl transition-colors cursor-pointer"
+              aria-disabled={!consentAccepted || isSubmitting}
+              className={`w-full inline-flex items-center justify-center gap-2 bg-blue-700 text-white font-bold text-sm px-5 py-3.5 rounded-xl transition-colors ${
+                !consentAccepted
+                  ? 'opacity-50 cursor-not-allowed'
+                  : 'hover:bg-blue-800 disabled:opacity-65 cursor-pointer'
+              }`}
             >
               {isSubmitting ? (
                 <>
@@ -484,6 +577,8 @@ export function BdappsSubscriptionCard({
               />
             </div>
 
+            {renderConsentBlock()}
+
             {statusMsg && (
               <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3.5 py-2 text-xs font-medium text-emerald-800">
                 {statusMsg}
@@ -501,8 +596,13 @@ export function BdappsSubscriptionCard({
 
             <button
               type="submit"
-              disabled={isSubmitting || otpCode.length < 4}
-              className="w-full inline-flex items-center justify-center gap-2 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-60 text-white font-bold text-sm px-5 py-3.5 rounded-xl transition-colors cursor-pointer"
+              disabled={isSubmitting}
+              aria-disabled={!consentAccepted || isSubmitting || otpCode.length < 4}
+              className={`w-full inline-flex items-center justify-center gap-2 bg-emerald-700 text-white font-bold text-sm px-5 py-3.5 rounded-xl transition-colors ${
+                !consentAccepted || otpCode.length < 4
+                  ? 'opacity-50 cursor-not-allowed'
+                  : 'hover:bg-emerald-800 disabled:opacity-60 cursor-pointer'
+              }`}
             >
               {isSubmitting ? (
                 <>

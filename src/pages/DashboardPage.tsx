@@ -34,6 +34,7 @@ import {
 } from '../services/bdappsService';
 import { useTopPicks } from '../hooks/useMarketQueries';
 import { LIVE_FEED_WAITING_BN } from '../services/apiClient';
+import { SelfRiskDisclaimerBanner } from '../components/common/SelfRiskDisclaimerBanner';
 import {
   STRONG_BUY_BADGE_BN,
   formatStrongBuyConsensusLine,
@@ -90,7 +91,11 @@ export function DashboardPage() {
           const refreshed = buildActiveSessionFromResponse(
             currentSession.mobile,
             res,
-            'check_subscription'
+            'check_subscription',
+            {
+              consentAccepted: currentSession.consentAccepted ?? true,
+              consentTimestamp: currentSession.consentTimestamp,
+            }
           );
           // Preserve original verifiedAt when refreshing so grace window math stays accurate
           refreshed.verifiedAt = currentSession.verifiedAt;
@@ -294,6 +299,36 @@ export function DashboardPage() {
                   {formatVerifiedTimestamp(session.verifiedAt)}
                 </dd>
               </div>
+
+              <div className="flex flex-col gap-1.5 bg-emerald-50/70 border border-emerald-200 rounded-xl px-4 py-3">
+                <div className="flex items-center justify-between gap-2">
+                  <dt className="text-xs font-semibold text-emerald-950">Legal Risk Consent</dt>
+                  <dd className="inline-flex items-center gap-1 text-xs font-bold text-emerald-800">
+                    <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                    <span>
+                      {session.consentAccepted !== false
+                        ? 'Agreed (I Agree)'
+                        : 'Pending'}
+                    </span>
+                  </dd>
+                </div>
+                <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-emerald-900/80">
+                  <span>
+                    সম্মতির সময়:{' '}
+                    {session.consentTimestamp
+                      ? formatVerifiedTimestamp(Date.parse(session.consentTimestamp) || session.verifiedAt)
+                      : formatVerifiedTimestamp(session.verifiedAt)}
+                  </span>
+                  <Link
+                    to="/risk-disclosure"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-semibold text-blue-700 underline underline-offset-2 hover:text-blue-800"
+                  >
+                    বিনিয়োগ ঝুঁকি ও নীতিমালা
+                  </Link>
+                </div>
+              </div>
             </dl>
           </div>
 
@@ -366,19 +401,21 @@ export function DashboardPage() {
             </Link>
           </div>
 
-          {/* Live Daily Strong Buy Radar Shortcuts */}
+          {/* Live Daily Strong Bullish Setup Radar Shortcuts */}
           <section className="bg-white border border-slate-200 rounded-2xl p-6 space-y-4 flex-1">
             <div className="flex items-center justify-between gap-2 pb-3 border-b border-slate-100">
               <div className="flex items-center gap-2">
                 <Activity className="w-4 h-4 text-emerald-700" />
                 <h2 className="text-sm font-bold text-slate-900">
-                  আজকের প্রকৃত Strong Buy সিগন্যাল শর্টকাট
+                  আজকের Strong Bullish Setup পর্যবেক্ষণ শর্টকাট
                 </h2>
               </div>
               <span className="text-[11px] font-semibold text-slate-500">
                 {picksData?.generated_at_bst || '৩:০০ PM BST'}
               </span>
             </div>
+
+            <SelfRiskDisclaimerBanner />
 
             {picks.length > 0 ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -400,7 +437,7 @@ export function DashboardPage() {
                     <div className="flex items-center justify-between text-xs font-mono-num text-slate-600">
                       <span>৳{pick.price.toFixed(2)}</span>
                       <span className="text-emerald-700 font-semibold">
-                        টার্গেট ৳{pick.target_price.toFixed(2)}
+                        রেফারেন্স টার্গেট ৳{pick.target_price.toFixed(2)}
                       </span>
                     </div>
                   </Link>

@@ -8,7 +8,8 @@ import type {
   TechnicalIndicators,
 } from '../types/market';
 
-export const STRONG_BUY_BADGE_BN = 'এখনই বাই করতে পারেন (Strong Buy)';
+export const STRONG_BUY_BADGE_BN =
+  'AI টেকনিক্যাল সিগন্যাল: Strong Bullish Setup (গবেষণামূলক পর্যবেক্ষণ)';
 export const MIN_STRONG_BUY_VOTES = 15;
 
 const BANGLA_DIGITS = ['০', '১', '২', '৩', '৪', '৫', '৬', '৭', '৮', '৯'];
@@ -18,7 +19,7 @@ export function toBanglaDigits(value: number | string): string {
 }
 
 export function formatStrongBuyConsensusLine(bullVotes: number): string {
-  return `২০টি সূচকের মধ্যে ${toBanglaDigits(bullVotes)}টি ইতিবাচক সিদ্ধান্ত • এখনই বাই করার উপযুক্ত`;
+  return `২০টি সূচকের মধ্যে ${toBanglaDigits(bullVotes)}টি ইতিবাচক সংকেত • শুধুমাত্র তথ্য ও বিশ্লেষণের জন্য`;
 }
 
 export interface StructuredBanglaReport {
@@ -188,10 +189,10 @@ export function normalizeStockAnalysis(raw: Partial<StockAnalysis>, fallbackExch
       actionType === 'BUY'
         ? STRONG_BUY_BADGE_BN
         : actionType === 'SELL'
-          ? 'বিক্রি বা সতর্ক থাকুন (Sell)'
+          ? 'AI টেকনিক্যাল সিগন্যাল: High Risk / Bearish Pressure (পর্যবেক্ষণমূলক)'
           : actionType === 'SIDEWAYS'
-            ? 'সাইডওয়ে মার্কেট — এড়িয়ে চলুন (Sideways)'
-            : 'হোল্ড / পর্যবেক্ষণ করুন (Hold)';
+            ? 'AI টেকনিক্যাল সিগন্যাল: Sideways Consolidation (পর্যবেক্ষণমূলক)'
+            : 'AI টেকনিক্যাল সিগন্যাল: Neutral / Hold Zone (পর্যবেক্ষণমূলক)';
 
     return {
       symbol,
@@ -301,7 +302,7 @@ export function normalizeStockAnalysis(raw: Partial<StockAnalysis>, fallbackExch
   cast('CCI-20', cci >= -20 && cci <= 160, 'CCI ইন্ডিকেটর বুলিশ', 'CCI ইন্ডিকেটর নেগেটিভ');
   cast('Support-1', effectivePrice >= s1 * 1.01, 'সাপোর্ট-১ এর উপরে সুরক্ষিত', 'সাপোর্ট ভাঙার ঝুঁকি');
   cast('Resistance Room', effectivePrice <= r1 * 0.992, 'রেজিস্ট্যান্স ব্রেকআউট জায়গা আছে', 'রেজিস্ট্যান্সের একদম কাছে');
-  cast('XGBoost Signal', mlSignalCode === 2, 'XGBoost ML: Strong Buy', 'XGBoost ML: সতর্ক/হোল্ড');
+  cast('XGBoost Signal', mlSignalCode === 2, 'XGBoost ML: Strong Bullish', 'XGBoost ML: Neutral/Caution');
   cast('ML Risk Filter', mlSignalCode !== 0, 'ML রিস্ক ফিল্টার পাস', 'ML হাই-রিস্ক সতর্কতা');
 
   const bullVotes = votes.filter((v) => v.bullish).length;
@@ -309,12 +310,12 @@ export function normalizeStockAnalysis(raw: Partial<StockAnalysis>, fallbackExch
 
   let actionType: ActionType = 'HOLD';
   let signalCode: 0 | 1 | 2 = 1;
-  let badgeText = 'হোল্ড / পর্যবেক্ষণ করুন (Hold)';
+  let badgeText = 'AI টেকনিক্যাল সিগন্যাল: Neutral / Hold Zone (পর্যবেক্ষণমূলক)';
 
   if (isSideways) {
     actionType = 'SIDEWAYS';
     signalCode = 1;
-    badgeText = 'সাইডওয়ে মার্কেট — এড়িয়ে চলুন (Sideways)';
+    badgeText = 'AI টেকনিক্যাল সিগন্যাল: Sideways Consolidation (পর্যবেক্ষণমূলক)';
   } else if (mlSignalCode === 2 && bullVotes >= MIN_STRONG_BUY_VOTES) {
     actionType = 'BUY';
     signalCode = 2;
@@ -322,7 +323,7 @@ export function normalizeStockAnalysis(raw: Partial<StockAnalysis>, fallbackExch
   } else if (mlSignalCode === 0 || bearVotes >= 12) {
     actionType = 'SELL';
     signalCode = 0;
-    badgeText = 'বিক্রি বা সতর্ক থাকুন (Sell)';
+    badgeText = 'AI টেকনিক্যাল সিগন্যাল: High Risk / Bearish Pressure (পর্যবেক্ষণমূলক)';
   }
 
   const targetPrice = Number((raw.target_price && raw.target_price > effectivePrice ? raw.target_price : r1).toFixed(2));
@@ -403,39 +404,39 @@ export function buildStructuredBanglaReport(analysis: StockAnalysis): Structured
   const recentLow = last5.length ? Math.min(...last5.map((d) => d.low), price) : price;
   const prevOpen = last5.length >= 2 ? last5[last5.length - 2].close : price;
 
-  let decisionTitle = 'চূড়ান্ত AI সিদ্ধান্ত: এখনই তাড়াহুড়ো নয়, পর্যবেক্ষণ করুন (Hold)';
-  let consensusVerdictLine = `২০টি সূচকের মধ্যে ${toBanglaDigits(bullCount)}টি ইতিবাচক ও ${toBanglaDigits(bearCount)}টি সতর্কতামূলক সিদ্ধান্ত`;
-  let decisionSummary = `${symbol} (${exchange}) শেয়ারটির ২০টি সূচকের মধ্যে ${toBanglaDigits(bullCount)}টি ইতিবাচক এবং ${toBanglaDigits(bearCount)}টি সতর্কতামূলক অবস্থানে রয়েছে। বাজার এখন পরবর্তী দিক নির্ধারণের অপেক্ষায় আছে।`;
-  let actionNote = `নতুন করে কেনার আগে শেয়ারটি নিচের সাপোর্ট ৳${s1.toFixed(2)} থেকে ঘুরে দাঁড়ায় কি না অথবা উপরের ৳${r1.toFixed(2)} সীমা অতিক্রম করে কি না তা দেখুন।`;
+  let decisionTitle = 'AI টেকনিক্যাল পর্যবেক্ষণ: Neutral / Hold Zone (গবেষণামূলক)';
+  let consensusVerdictLine = `২০টি সূচকের মধ্যে ${toBanglaDigits(bullCount)}টি ইতিবাচক ও ${toBanglaDigits(bearCount)}টি সতর্কতামূলক সংকেত • শুধুমাত্র তথ্য ও বিশ্লেষণের জন্য`;
+  let decisionSummary = `${symbol} (${exchange}) শেয়ারটির ঐতিহাসিক ডেটা বিশ্লেষণে ২০টি সূচকের মধ্যে ${toBanglaDigits(bullCount)}টি ইতিবাচক এবং ${toBanglaDigits(bearCount)}টি সতর্কতামূলক অবস্থানে দেখা যাচ্ছে। সূচকসমূহ বর্তমানে মিশ্র/নিরপেক্ষ প্রবণতা নির্দেশ করছে।`;
+  let actionNote = `গাণিতিক মডেল অনুযায়ী নিচের সাপোর্ট রেফারেন্স ৳${s1.toFixed(2)} এবং উপরের রেজিস্ট্যান্স রেফারেন্স ৳${r1.toFixed(2)} গুরুত্বপূর্ণ টেকনিক্যাল সীমা হিসেবে চিহ্নিত হয়েছে।`;
 
   if (analysis.action_type === 'BUY') {
-    decisionTitle = `চূড়ান্ত AI সিদ্ধান্ত: ${STRONG_BUY_BADGE_BN}`;
+    decisionTitle = STRONG_BUY_BADGE_BN;
     consensusVerdictLine = formatStrongBuyConsensusLine(bullCount);
-    decisionSummary = `আমাদের কোয়ান্টিটেটিভ বিশ্লেষণে ${symbol} (${exchange}) শেয়ারটির ${consensusVerdictLine} (মডেল কনফিডেন্স ${confidence.toFixed(1)}%)। মূল প্রাইস ট্রেন্ড ও মোমেন্টাম স্পষ্টভাবে ঊর্ধ্বমুখী।`;
-    actionNote = `বর্তমান বাজার দর ৳${price.toFixed(2)}-এ ধাপে ধাপে এন্ট্রি বিবেচনা করা যেতে পারে। প্রথম লক্ষ্যমাত্রা ৳${r1.toFixed(2)} (সম্ভাব্য লাভ +${gainPct}%) এবং পরবর্তী লক্ষ্যমাত্রা ৳${r2.toFixed(2)}।`;
+    decisionSummary = `গাণিতিক ও কোয়ান্টিটেটিভ বিশ্লেষণে ${symbol} (${exchange}) শেয়ারটিতে ${consensusVerdictLine} (মডেল কনফিডেন্স ${confidence.toFixed(1)}%)। ঐতিহাসিক প্রাইস ট্রেন্ড ও মোমেন্টাম সূচকসমূহ ঊর্ধ্বমুখী প্রবণতা প্রদর্শন করছে।`;
+    actionNote = `ঐতিহাসিক প্রাইস অ্যাকশন ও ভোলাটিলিটি মডেল অনুযায়ী বর্তমান দর ৳${price.toFixed(2)}-এর বিপরীতে রেজিস্ট্যান্স রেফারেন্স লেভেল-১ ৳${r1.toFixed(2)} (+${gainPct}%) এবং লেভেল-২ ৳${r2.toFixed(2)} হিসাবে গণনা করা হয়েছে (কেবল শিক্ষামূলক পর্যবেক্ষণ)।`;
   } else if (analysis.action_type === 'SELL') {
-    decisionTitle = 'চূড়ান্ত AI সিদ্ধান্ত: বিক্রি বা সতর্ক থাকুন (High Risk / Sell)';
-    consensusVerdictLine = `২০টি সূচকের মধ্যে ${toBanglaDigits(bearCount)}টি নেতিবাচক চাপ নির্দেশ করছে • সতর্ক থাকুন`;
-    decisionSummary = `বিশ্লেষণে দেখা যাচ্ছে ${symbol} (${exchange}) শেয়ারটির ২০টি সূচকের মধ্যে ${toBanglaDigits(bearCount)}টিই নেতিবাচক চাপ নির্দেশ করছে। উপরের রেজিস্ট্যান্স বাধায় শেয়ারটি নিচের দিকে নামার ঝুঁকিতে রয়েছে।`;
-    actionNote = `হাতে শেয়ার থাকলে বর্তমান দর ৳${price.toFixed(2)}-এ মুনাফা সুরক্ষা বিবেচনা করুন। নিচের সাপোর্ট ৳${s1.toFixed(2)} (ঝুঁকি -${riskPct}%) স্থিতিশীল না হওয়া পর্যন্ত নতুন এন্ট্রি এড়িয়ে চলুন।`;
+    decisionTitle = 'AI টেকনিক্যাল সিগন্যাল: High Risk / Bearish Pressure (গবেষণামূলক পর্যবেক্ষণ)';
+    consensusVerdictLine = `২০টি সূচকের মধ্যে ${toBanglaDigits(bearCount)}টি নেতিবাচক টেকনিক্যাল সংকেত • শুধুমাত্র তথ্য ও বিশ্লেষণের জন্য`;
+    decisionSummary = `টেকনিক্যাল বিশ্লেষণে দেখা যাচ্ছে ${symbol} (${exchange}) শেয়ারটির ২০টি সূচকের মধ্যে ${toBanglaDigits(bearCount)}টি নেতিবাচক প্রবণতা দেখাচ্ছে। ঐতিহাসিক রেজিস্ট্যান্স জোনে নিম্নমুখী চাপ লক্ষণীয়।`;
+    actionNote = `মডেল অনুযায়ী বর্তমান দর ৳${price.toFixed(2)}-এর নিচে সাপোর্ট রেফারেন্স লেভেল-১ ৳${s1.toFixed(2)} (-${riskPct}%) গুরুত্বপূর্ণ পর্যবেক্ষণ সীমা হিসেবে চিহ্নিত।`;
   } else if (analysis.action_type === 'SIDEWAYS') {
-    decisionTitle = 'চূড়ান্ত AI সিদ্ধান্ত: সাইডওয়ে মার্কেট (এখন এন্ট্রি নয়)';
-    consensusVerdictLine = `সংকীর্ণ সাইডওয়ে রেঞ্জ (${rangePct.toFixed(1)}%) • ব্রেকআউটের আগে এড়িয়ে চলুন`;
-    decisionSummary = `${symbol} (${exchange}) শেয়ারটি বর্তমানে একটি সংকীর্ণ সাইডওয়ে রেঞ্জে আটকে আছে (২০-দিনের ওঠানামা মাত্র ${rangePct.toFixed(1)}%)। এই অবস্থায় মূলধন আটকে থাকার ঝুঁকি বেশি।`;
-    actionNote = `শেয়ারটি উপরের রেজিস্ট্যান্স ৳${r1.toFixed(2)} ভলিউমসহ ব্রেকআউট না করা পর্যন্ত অপেক্ষা করাই নিরাপদ।`;
+    decisionTitle = 'AI টেকনিক্যাল সিগন্যাল: Sideways Consolidation (পর্যবেক্ষণমূলক)';
+    consensusVerdictLine = `সংকীর্ণ সাইডওয়ে রেঞ্জ (${rangePct.toFixed(1)}%) • শুধুমাত্র তথ্য ও বিশ্লেষণের জন্য`;
+    decisionSummary = `${symbol} (${exchange}) শেয়ারটি বর্তমানে একটি সংকীর্ণ সাইডওয়ে সীমায় অবস্থান করছে (২০-দিনের ওঠানামা মাত্র ${rangePct.toFixed(1)}%)। স্পষ্ট দিকনির্দেশক মোমেন্টাম এখনো তৈরি হয়নি।`;
+    actionNote = `টেকনিক্যাল চার্ট অনুযায়ী ৳${s1.toFixed(2)} সাপোর্ট ও ৳${r1.toFixed(2)} রেজিস্ট্যান্স রেফারেন্স সীমার মধ্যে কনসোলিডেশন পর্যবেক্ষণ করা যাচ্ছে।`;
   }
 
   const trendNote =
     price >= sma20
       ? `গত ২০ কার্যদিবসের গড় দরের (৳${sma20.toFixed(2)}) উপরে অবস্থান করায় ঊর্ধ্বমুখী ধারা বজায় রয়েছে।`
-      : `গত ২০ কার্যদিবসের গড় দরের (৳${sma20.toFixed(2)}) নিচে অবস্থান করায় বিক্রির চাপ লক্ষ্য করা যাচ্ছে।`;
+      : `গত ২০ কার্যদিবসের গড় দরের (৳${sma20.toFixed(2)}) নিচে অবস্থান করায় নিম্নমুখী চাপ লক্ষ্য করা যাচ্ছে।`;
 
   const momentumNote =
     rsi14 < 40
-      ? `RSI(14) বর্তমানে ${rsi14.toFixed(1)}—অতিরিক্ত বিক্রিত জোন থেকে রিবাউন্ডের সম্ভাবনা রয়েছে।`
+      ? `RSI(14) বর্তমানে ${rsi14.toFixed(1)}—নিম্ন মোমেন্টাম বা ওভারসোল্ড জোনের কাছাকাছি অবস্থান করছে।`
       : rsi14 > 68
-        ? `RSI(14) বর্তমানে ${rsi14.toFixed(1)}—দ্রুত বৃদ্ধির পর স্বল্পমেয়াদি প্রফিট-বুকিং চাপ আসতে পারে।`
-        : `RSI(14) বর্তমানে ${rsi14.toFixed(1)}—কেনাবেচার গতি ভারসাম্যপূর্ণ ও সুস্থ অবস্থায় রয়েছে।`;
+        ? `RSI(14) বর্তমানে ${rsi14.toFixed(1)}—দ্রুত বৃদ্ধির পর ওভারবট বা উচ্চ-মোমেন্টাম জোনে অবস্থান করছে।`
+        : `RSI(14) বর্তমানে ${rsi14.toFixed(1)}—লেনদেনের গতি ভারসাম্যপূর্ণ অবস্থায় রয়েছে।`;
 
   const rawExtra = (analysis.ai_analysis_bn || '').trim();
   const isGeneric =
@@ -449,9 +450,9 @@ export function buildStructuredBanglaReport(analysis: StockAnalysis): Structured
     consensusVerdictLine,
     trendNote,
     momentumNote,
-    supportResistanceNote: `নিরাপদ সাপোর্ট-১: ৳${s1.toFixed(2)} (সাপোর্ট-২: ৳${s2.toFixed(2)}) · রেজিস্ট্যান্স-১: ৳${r1.toFixed(2)} (রেজিস্ট্যান্স-২: ৳${r2.toFixed(2)})।`,
+    supportResistanceNote: `গাণিতিক সাপোর্ট-১: ৳${s1.toFixed(2)} (সাপোর্ট-২: ৳${s2.toFixed(2)}) · রেজিস্ট্যান্স-১: ৳${r1.toFixed(2)} (রেজিস্ট্যান্স-২: ৳${r2.toFixed(2)})।`,
     recentRangeNote: `বর্তমান বাজার দর ৳${price.toFixed(2)} (পূর্ববর্তী ক্লোজ ৳${prevOpen.toFixed(2)}, সাম্প্রতিক ৫-সেশন সীমা ৳${recentLow.toFixed(2)} – ৳${recentHigh.toFixed(2)})।`,
-    actionNote: `${actionNote} বিনিয়োগ সুরক্ষায় অবশ্যই ৳${s1.toFixed(2)} দরে স্টপ-লস মেনে চলুন।`,
+    actionNote: `${actionNote} মডেল-গণনাকৃত ঝুঁকি রেফারেন্স (স্টপ-লস সীমা): ৳${s1.toFixed(2)} (নিজ দায়িত্বে যাচাইযোগ্য)।`,
     extraObservation: isGeneric ? null : rawExtra,
   };
 }

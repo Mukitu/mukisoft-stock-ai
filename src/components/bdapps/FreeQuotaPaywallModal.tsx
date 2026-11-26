@@ -88,7 +88,7 @@ export function FreeQuotaPaywallModal({
         {/* Scrollable Body with Subtitle & Embedded 2-Step Robi & Cirkle OTP Form */}
         <div className="p-4 sm:p-6 space-y-4 overflow-y-auto min-w-0">
           <p className="text-xs sm:text-sm text-slate-700 leading-relaxed font-medium">
-            অপেক্ষা না করে এখনই আনলিমিটেড DSE ও CSE স্টক AI বিশ্লেষণ ও ৬টি Strong Buy সিগন্যাল পেতে সাবস্ক্রাইব করুন —{' '}
+            অপেক্ষা না করে এখনই আনলিমিটেড DSE ও CSE স্টক AI টেকনিক্যাল বিশ্লেষণ ও ৬টি Strong Bullish Setup পর্যবেক্ষণ পেতে সাবস্ক্রাইব করুন —{' '}
             <strong className="text-slate-900">
               মাত্র ৳২.৭৮ টাকা /দিন (ভ্যাট + এসডি + এসসি সহ)
             </strong>

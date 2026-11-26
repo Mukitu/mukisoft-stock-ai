@@ -22,6 +22,8 @@ export interface BdappsSession {
   mobile: string;
   verifiedAt: number;
   source: 'check_subscription' | 'send_otp' | 'verify_otp';
+  consentAccepted: boolean;
+  consentTimestamp: string;
 }
 
 export interface BdappsPendingOtp {
@@ -302,7 +304,8 @@ export async function unsubscribeBdapps(params: {
 export function buildActiveSessionFromResponse(
   mobile: string,
   data: BdappsApiResponse,
-  source: BdappsSession['source']
+  source: BdappsSession['source'],
+  consent?: { consentAccepted?: boolean; consentTimestamp?: string }
 ): BdappsSession {
   const rawStatus = normalizeSubscriptionStatus(data.subscriptionStatus);
   const subscriptionStatus =
@@ -317,5 +320,7 @@ export function buildActiveSessionFromResponse(
     mobile,
     verifiedAt: Date.now(),
     source,
+    consentAccepted: consent?.consentAccepted ?? true,
+    consentTimestamp: consent?.consentTimestamp || new Date().toISOString(),
   };
 }

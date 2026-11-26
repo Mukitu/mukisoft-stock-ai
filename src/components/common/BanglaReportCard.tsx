@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import type { StockAnalysis } from '../../types/market';
 import { buildStructuredBanglaReport } from '../../utils/quantConsensus';
+import { SelfRiskDisclaimerBanner } from './SelfRiskDisclaimerBanner';
 
 export function BanglaReportCard({
   analysis,
@@ -52,7 +53,7 @@ export function BanglaReportCard({
           <span className="font-mono-num">{report.recentRangeNote}</span>
         </li>
         <li>
-          <strong className="text-slate-900">করণীয় ও ঝুঁকি ব্যবস্থাপনা:</strong> {report.actionNote}
+          <strong className="text-slate-900">গাণিতিক পর্যবেক্ষণ ও ঝুঁকি রেফারেন্স:</strong> {report.actionNote}
         </li>
       </ul>
 
@@ -94,6 +95,9 @@ export function BanglaReportCard({
           </div>
         )}
       </div>
+
+      {/* Mandatory BSEC & Self-Risk Disclaimer Banner Below Every Report */}
+      <SelfRiskDisclaimerBanner />
     </section>
   );
 }
