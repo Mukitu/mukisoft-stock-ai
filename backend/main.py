@@ -61,7 +61,8 @@ BASE_DIR = Path(__file__).resolve().parent
 DAILY_CACHE_FILE = BASE_DIR / "daily_picks_cache.json"
 SUBSCRIBER_SESSIONS_FILE = BASE_DIR / "subscriber_sessions.json"
 SYMBOL_CACHE_DIR = BASE_DIR / "symbol_ohlcv_cache"
-SYMBOL_LOOKUP_CACHE_FILE = BASE_DIR / "symbol_lookup_cache.json"
+WARM_BOARD_CACHE_FILE = BASE_DIR / "warm_board_cache.json"
+LEGACY_SYMBOL_LOOKUP_CACHE_FILE = BASE_DIR / "symbol_lookup_cache.json"
 MARKET_LIVE_CACHE_FILE = BASE_DIR / "market_live_cache.json"
 AI_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
 BDAPPS_API_BASE = os.getenv("BDAPPS_API_BASE", "https://stock.skillproof.top").strip().rstrip("/")
@@ -699,15 +700,17 @@ def _seed_cache_from_edge_ml_snapshot() -> None:
                     continue
                 price = _parse_float(item.get("current_price"))
                 if price > 0 and sym not in _WARM_SYMBOL_LOOKUP[exch]:
-                    chg_pct = _parse_float(item.get("change_pct"))
+                    chg_pct = round(_parse_float(item.get("change_pct")), 2)
                     ycp = round(price / (1.0 + chg_pct / 100.0), 2) if abs(1.0 + chg_pct / 100.0) > 1e-6 else price
                     _WARM_SYMBOL_LOOKUP[exch][sym] = {
                         "date": today_iso,
+                        "ltp": price,
                         "open": ycp,
-                        "high": price,
+                        "high": max(price, ycp),
                         "low": min(price, ycp),
                         "close": price,
                         "ycp": ycp,
+                        "change_pct": chg_pct,
                         "volume": _parse_float(item.get("volume")),
                     }
                     seeded_quotes += 1
@@ -736,10 +739,15 @@ def _seed_cache_from_edge_ml_snapshot() -> None:
 
 def _load_warm_symbol_lookup_from_disk() -> None:
     global _WARM_LOOKUP_UPDATED_TS
-    if not SYMBOL_LOOKUP_CACHE_FILE.exists():
+    source_file = (
+        WARM_BOARD_CACHE_FILE
+        if WARM_BOARD_CACHE_FILE.exists()
+        else LEGACY_SYMBOL_LOOKUP_CACHE_FILE
+    )
+    if not source_file.exists():
         return
     try:
-        raw = json.loads(SYMBOL_LOOKUP_CACHE_FILE.read_text(encoding="utf-8"))
+        raw = json.loads(source_file.read_text(encoding="utf-8"))
         if not isinstance(raw, dict):
             return
         with _WARM_LOOKUP_LOCK:
@@ -749,12 +757,13 @@ def _load_warm_symbol_lookup_from_disk() -> None:
                     _WARM_SYMBOL_LOOKUP[exch] = bucket
             _WARM_LOOKUP_UPDATED_TS = float(raw.get("updated_ts") or 0.0)
         logger.info(
-            "Loaded warm symbol lookup table from disk (DSE=%d, CSE=%d)",
+            "Loaded warm board cache from %s (DSE=%d, CSE=%d)",
+            source_file.name,
             len(_WARM_SYMBOL_LOOKUP["DSE"]),
             len(_WARM_SYMBOL_LOOKUP["CSE"]),
         )
     except Exception as exc:
-        logger.debug("Failed loading symbol_lookup_cache.json: %s", exc)
+        logger.debug("Failed loading warm_board_cache.json: %s", exc)
 
 
 def _save_warm_symbol_lookup_to_disk() -> None:
@@ -769,9 +778,9 @@ def _save_warm_symbol_lookup_to_disk() -> None:
         fd, tmp_path = tempfile.mkstemp(dir=str(BASE_DIR), suffix=".tmp")
         with os.fdopen(fd, "w", encoding="utf-8") as tmp_file:
             json.dump(payload, tmp_file, ensure_ascii=False)
-        os.replace(tmp_path, SYMBOL_LOOKUP_CACHE_FILE)
+        os.replace(tmp_path, WARM_BOARD_CACHE_FILE)
     except Exception as exc:
-        logger.debug("Failed saving symbol_lookup_cache.json atomically: %s", exc)
+        logger.debug("Failed saving warm_board_cache.json atomically: %s", exc)
 
 
 def _get_warm_lookup_quote(exchange: str, symbol: str) -> dict[str, Any] | None:
@@ -805,17 +814,25 @@ def _board_df_to_lookup_map(board_df: pd.DataFrame | None) -> dict[str, dict[str
         price = ltp if ltp > 0 else (close_p if close_p > 0 else ycp)
         if price <= 0:
             continue
-        open_p = _parse_float(row.get("open")) or ycp or price
+        ycp_val = ycp if ycp > 0 else price
+        open_p = _parse_float(row.get("open")) or ycp_val
         high_p = _parse_float(row.get("high")) or max(open_p, price)
         low_p = _parse_float(row.get("low")) or min(open_p, price)
         vol = _parse_float(row.get("volume"))
+        chg_pct = (
+            _parse_float(row.get("change_pct"))
+            if "change_pct" in df.columns and row.get("change_pct") is not None
+            else (round(((price - ycp_val) / ycp_val) * 100.0, 2) if ycp_val > 0 else 0.0)
+        )
         out[sym] = {
             "date": today_iso,
+            "ltp": price,
             "open": open_p,
             "high": max(high_p, open_p, price),
             "low": min(low_p, open_p, price) if low_p > 0 else min(open_p, price),
             "close": price,
-            "ycp": ycp if ycp > 0 else open_p,
+            "ycp": ycp_val,
+            "change_pct": chg_pct,
             "volume": vol,
         }
     return out
@@ -1070,7 +1087,10 @@ async def scrape_dse_day_end_archive(symbol: str) -> pd.DataFrame | None:
         rows_out: list[dict[str, Any]] = []
 
         for tr in soup.find_all("tr"):
-            cells = [td.get_text(" ", strip=True) for td in tr.find_all("td")]
+            cells = [
+                re.sub(r"\s+", "", td.get_text("", strip=True)) if idx == 1 else td.get_text(" ", strip=True)
+                for idx, td in enumerate(tr.find_all("td"))
+            ]
             if len(cells) < 11:
                 continue
             code = cells[2].strip().upper()
@@ -1131,7 +1151,10 @@ async def scrape_cse_board_map() -> dict[str, dict[str, Any]]:
         today_iso = get_bst_now().date().isoformat()
         board_map: dict[str, dict[str, Any]] = {}
         for tr in soup.find_all("tr"):
-            cells = [td.get_text(" ", strip=True) for td in tr.find_all("td")]
+            cells = [
+                re.sub(r"\s+", "", td.get_text("", strip=True)) if idx == 1 else td.get_text(" ", strip=True)
+                for idx, td in enumerate(tr.find_all("td"))
+            ]
             if len(cells) < 8:
                 continue
             sym = cells[1].strip().upper()
@@ -1146,13 +1169,16 @@ async def scrape_cse_board_map() -> dict[str, dict[str, Any]]:
             price = ltp if ltp > 0 else ycp
             if price <= 0:
                 continue
+            ycp_val = ycp if ycp > 0 else price
             board_map[sym] = {
                 "date": today_iso,
-                "open": open_p if open_p > 0 else (ycp if ycp > 0 else price),
+                "ltp": price,
+                "open": open_p if open_p > 0 else ycp_val,
                 "high": max(high_p, price),
                 "low": min(low_p, price) if low_p > 0 else price,
                 "close": price,
-                "ycp": ycp if ycp > 0 else price,
+                "ycp": ycp_val,
+                "change_pct": round(((price - ycp_val) / ycp_val) * 100.0, 2) if ycp_val > 0 else 0.0,
                 "volume": vol,
             }
         if board_map:
@@ -1435,17 +1461,18 @@ async def fetch_dynamic_ohlcv_for_symbol(
         try:
             return await asyncio.wait_for(
                 asyncio.to_thread(_fetch_bdshare_history_sync, symbol),
-                timeout=UPSTREAM_HTTP_TIMEOUT,
+                timeout=3.5,
             )
         except Exception:
             return None
 
-    # 2. Off-market fast path when warm board quote is present but per-symbol disk cache is cold:
-    #    Give bdshare 90D history 0.85s inline; if slower, serve warm board quote immediately (<1s)
-    #    and finish persisting 90D history in the background for the next call.
-    if not session["is_live"] and live_quote is not None and cached_meta is None:
+    # 2. Fast Warm-Board Fallback for ANY uncached symbol (live OR off-market):
+    #    Give bdshare 3.5s fetch window in background while bounding inline wait to 1.1s.
+    #    If slower, immediately synthesize a valid technical OHLCV series from warm_board_cache.json
+    #    so ANY searched DSE/CSE symbol returns HTTP 200 with real exchange pricing in <2 seconds.
+    if live_quote is not None and cached_meta is None:
         hist_task = asyncio.create_task(_bdshare_hist_task())
-        done, _pending = await asyncio.wait({hist_task}, timeout=0.85)
+        done, _pending = await asyncio.wait({hist_task}, timeout=1.1)
         if hist_task in done:
             try:
                 hist_res = hist_task.result()
@@ -1478,7 +1505,8 @@ async def fetch_dynamic_ohlcv_for_symbol(
             if quote_source:
                 source_parts.append(quote_source)
             label_fast = " + ".join(source_parts) if source_parts else quote_source
-            save_symbol_ohlcv_cache(exchange, symbol, final_fast, label_fast)
+            if hist_df is not None:
+                save_symbol_ohlcv_cache(exchange, symbol, final_fast, label_fast)
             return final_fast, label_fast
 
     async def _quote_task() -> tuple[dict[str, Any] | None, str]:
@@ -1746,8 +1774,15 @@ async def lifespan(_app: FastAPI):
             except Exception as exc:
                 logger.warning("Prewarm task iteration failed: %s", exc)
 
-            # Refresh full DSE/CSE warm market board cache every 5 minutes (300s)
-            await asyncio.sleep(300)
+            # Refresh every 5 minutes during market hours (10:00 AM–2:30 PM BST) & wake right at 2:40 PM BST
+            now_after = get_bst_now()
+            sleep_sec = 300
+            if now_after.weekday() in {6, 0, 1, 2, 3}:
+                target_240 = now_after.replace(hour=14, minute=40, second=0, microsecond=0)
+                secs_to_240 = (target_240 - now_after).total_seconds()
+                if 5 < secs_to_240 < 300:
+                    sleep_sec = int(secs_to_240)
+            await asyncio.sleep(sleep_sec)
 
     task = asyncio.create_task(prewarm_loop())
     try:

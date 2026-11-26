@@ -20,6 +20,8 @@ import hashlib
 import json
 import os
 import re
+import socket
+import subprocess
 import sys
 import tempfile
 import time
@@ -123,15 +125,42 @@ def _is_allowlisted_url(url: str) -> bool:
     return parsed.scheme == "https" and (parsed.hostname or "").lower() in ALLOWED_EXCHANGE_HOSTS
 
 
-def _http_get_text(url: str, timeout: float = 8.0) -> str | None:
+def _http_get_text(url: str, timeout: float = 12.0) -> str | None:
     if not _is_allowlisted_url(url):
         return None
+    req_headers = dict(HTTP_HEADERS)
+    if "cse.com.bd" in url:
+        req_headers["Referer"] = "https://www.cse.com.bd/"
     try:
-        req = urllib.request.Request(url, headers=HTTP_HEADERS)
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        req = urllib.request.Request(url, headers=req_headers)
+        with urllib.request.urlopen(req, timeout=min(timeout, 12.0)) as resp:
             if resp.status == 200:
-                return resp.read().decode("utf-8", "ignore")
+                body = resp.read().decode("utf-8", "ignore")
+                if body.strip():
+                    return body
     except Exception as exc:
+        # Fallback to IPv4 system curl (uses OS trust store with full TLS verification)
+        try:
+            out = subprocess.check_output(
+                [
+                    "curl",
+                    "-4",
+                    "-fsSL",
+                    "--max-time",
+                    str(max(12, int(timeout))),
+                    "-A",
+                    req_headers["User-Agent"],
+                    "-e",
+                    req_headers["Referer"],
+                    url,
+                ],
+                stderr=subprocess.DEVNULL,
+            )
+            text = out.decode("utf-8", "ignore")
+            if text.strip():
+                return text
+        except Exception as curl_exc:
+            print(f"[fetch] {url} curl fallback failed: {curl_exc}")
         print(f"[fetch] {url} failed: {exc}")
     return None
 
@@ -149,12 +178,15 @@ def _parse_float(raw: Any, default: float = 0.0) -> float:
         return default
 
 
-def _atomic_write_json(target_path: Path, payload: dict[str, Any]) -> None:
+def _atomic_write_json(target_path: Path, payload: dict[str, Any], *, compact: bool = False) -> None:
     target_path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_path = tempfile.mkstemp(dir=str(target_path.parent), suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as tmp_file:
-            json.dump(payload, tmp_file, ensure_ascii=False, indent=2)
+            if compact:
+                json.dump(payload, tmp_file, ensure_ascii=False, separators=(",", ":"))
+            else:
+                json.dump(payload, tmp_file, ensure_ascii=False, indent=2)
         os.replace(tmp_path, target_path)
     except Exception:
         if os.path.exists(tmp_path):
@@ -281,7 +313,7 @@ def fetch_closing_indices_and_home_board() -> tuple[dict[str, Any], pd.DataFrame
                     val = _parse_float(latest[col])
                     if not indices["dsex"] and "dsex" in low and 1000.0 <= val <= 25000.0:
                         indices["dsex"] = f"{val:,.2f}"
-                    elif not indices["ds30"] and "ds30" in low and 400.0 <= val <= 12000.0:
+                    elif not indices["ds30"] and low == "ds30" and 400.0 <= val <= 12000.0:
                         indices["ds30"] = f"{val:,.2f}"
         except Exception as exc:
             print(f"[bdshare] get_market_info failed: {exc}")
@@ -289,15 +321,66 @@ def fetch_closing_indices_and_home_board() -> tuple[dict[str, Any], pd.DataFrame
     return indices, home_board_df
 
 
-def fetch_cse_closing_board() -> dict[str, dict[str, Any]]:
-    """Scrapes CSE official closing price board when reachable."""
-    html = _http_get_text("https://www.cse.com.bd/market/current_price", timeout=8.0)
-    if not html:
+def fetch_dse_legacy_board() -> dict[str, dict[str, Any]]:
+    """Scrapes full DSE OHLCV+Volume board from latest_share_price_scroll_l.php when reachable."""
+    html = _http_get_text("https://www.dsebd.org/latest_share_price_scroll_l.php", timeout=8.0)
+    if not html or BeautifulSoup is None:
         return {}
     soup = BeautifulSoup(html, "html.parser")
     board: dict[str, dict[str, Any]] = {}
-    for tr in soup.find_all("tr"):
-        cells = [td.get_text(" ", strip=True) for td in tr.find_all("td")]
+    for table in soup.find_all("table"):
+        for tr in table.find_all("tr"):
+            cells = [td.get_text(" ", strip=True) for td in tr.find_all("td")]
+            if len(cells) < 10:
+                continue
+            sym = cells[1].strip().upper()
+            if not SYMBOL_REGEX.match(sym):
+                continue
+            ltp = _parse_float(cells[2])
+            close_p = _parse_float(cells[5])
+            ycp = _parse_float(cells[6])
+            price = ltp if ltp > 0 else (close_p if close_p > 0 else ycp)
+            if price <= 0:
+                continue
+            high_p = _parse_float(cells[3]) or price
+            low_p = _parse_float(cells[4]) or price
+            vol = _parse_float(cells[10]) if len(cells) > 10 else 0.0
+            ycp_val = ycp if ycp > 0 else price
+            board[sym] = {
+                "open": ycp_val,
+                "high": max(high_p, price),
+                "low": min(low_p, price) if low_p > 0 else price,
+                "close": price,
+                "ycp": ycp_val,
+                "volume": vol,
+            }
+    return board
+
+
+def fetch_cse_closing_board() -> dict[str, dict[str, Any]]:
+    """Scrapes CSE official closing price board when reachable (stdlib HTML regex fallback if bs4 unavailable)."""
+    html = _http_get_text("https://www.cse.com.bd/market/current_price", timeout=35.0)
+    if not html:
+        html = _http_get_text("https://www.cse.com.bd/market/current_price", timeout=35.0)
+    if not html:
+        return {}
+    board: dict[str, dict[str, Any]] = {}
+    if BeautifulSoup is not None:
+        soup = BeautifulSoup(html, "html.parser")
+        rows_cells = [
+            [re.sub(r"\s+", "", td.get_text("", strip=True)) if idx == 1 else td.get_text(" ", strip=True) for idx, td in enumerate(tr.find_all("td"))]
+            for tr in soup.find_all("tr")
+        ]
+    else:
+        rows_cells = []
+        for tr_m in re.finditer(r"<tr[^>]*>(.*?)</tr>", html, re.IGNORECASE | re.DOTALL):
+            cells = [
+                re.sub(r"<[^>]+>", "", td_m.group(1)).strip()
+                for td_m in re.finditer(r"<td[^>]*>(.*?)</td>", tr_m.group(1), re.IGNORECASE | re.DOTALL)
+            ]
+            rows_cells.append(cells)
+
+    for cells in rows_cells:
         if len(cells) < 8:
             continue
         sym = cells[1].strip().upper()
@@ -363,6 +446,7 @@ def _analyze_single_symbol(
     start_date: str,
     end_date: str,
     board_map: dict[str, dict[str, Any]],
+    trading_date: str,
 ) -> tuple[str, dict[str, Any] | None, bool]:
     """
     Runs real 17-feature XGBoost + 20-indicator analysis for a single DSE symbol.
@@ -370,6 +454,7 @@ def _analyze_single_symbol(
     """
     hist_df: pd.DataFrame | None = None
     has_90d = False
+    quote = board_map.get(symbol)
     try:
         raw_df = get_basic_historical_data(start_date, end_date, symbol)
         if raw_df is not None and len(raw_df) >= 15:
@@ -378,8 +463,30 @@ def _analyze_single_symbol(
     except Exception:
         hist_df = None
 
+    if hist_df is not None and quote and quote["close"] > 0:
+        # Ensure latest closing board bar is reflected on top of 90D OHLCV
+        cols_lower = {str(c).lower().strip(): c for c in hist_df.columns}
+        date_col = cols_lower.get("date") or cols_lower.get("trading date") or cols_lower.get("trade_date")
+        close_col = cols_lower.get("close") or cols_lower.get("closep")
+        if date_col and close_col and len(hist_df) > 0:
+            last_date = str(hist_df.iloc[-1][date_col])[:10]
+            if trading_date > last_date and abs(float(hist_df.iloc[-1][close_col]) - quote["close"]) > 1e-6:
+                new_row = {col: hist_df.iloc[-1][col] for col in hist_df.columns}
+                new_row[date_col] = trading_date
+                if cols_lower.get("open"):
+                    new_row[cols_lower["open"]] = quote["open"]
+                if cols_lower.get("high"):
+                    new_row[cols_lower["high"]] = quote["high"]
+                if cols_lower.get("low"):
+                    new_row[cols_lower["low"]] = quote["low"]
+                new_row[close_col] = quote["close"]
+                if cols_lower.get("volume") and quote["volume"] > 0:
+                    new_row[cols_lower["volume"]] = quote["volume"]
+                hist_df = pd.concat([hist_df, pd.DataFrame([new_row])], ignore_index=True)
+
     if hist_df is None:
-        quote = fetch_dse_company_ssr_quote(symbol) or board_map.get(symbol)
+        if not quote or quote["close"] <= 0:
+            quote = fetch_dse_company_ssr_quote(symbol)
         if not quote or quote["close"] <= 0:
             return symbol, None, False
         hist_df = build_manual_ohlcv_frame(
@@ -407,30 +514,34 @@ def _analyze_single_symbol(
 
 def build_post_market_snapshots() -> int:
     os.environ["BDSHARE_SOURCE"] = "new"
+    socket.setdefaulttimeout(6.0)
     now_bst = get_bst_now()
     session = get_bd_market_session(now_bst)
     generated_at_bst = now_bst.strftime("%d %b %Y, %I:%M %p")
     trading_date = now_bst.strftime("%Y-%m-%d")
 
-    print(f"Starting Post-Market ML Sync at {generated_at_bst} BST...")
+    print(f"Starting 100% Full-Exchange Post-Market ML Sync at {generated_at_bst} BST...")
 
-    # 1. Fetch closing DSEX/DS30 indices + homepage ticker board
-    indices, home_board_df = fetch_closing_indices_and_home_board()
-    print(f"Indices fetched: DSEX={indices.get('dsex') or 'N/A'}, DS30={indices.get('ds30') or 'N/A'}")
+    # 1. Fetch closing DSEX/DS30 indices + homepage ticker board + CSE board concurrently
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pre_exec:
+        idx_fut = pre_exec.submit(fetch_closing_indices_and_home_board)
+        cse_fut = pre_exec.submit(fetch_cse_closing_board)
+        indices, home_board_df = idx_fut.result()
+        cse_board = cse_fut.result()
+    print(f"Indices fetched: DSEX={indices.get('dsex') or 'N/A'}, DS30={indices.get('ds30') or 'N/A'}, CSE={len(cse_board)}")
 
-    # 2. Fetch full live/closing DSE board (bdshare primary, homepage SSR ticker fallback)
+    # 2. Fetch full live/closing DSE board (dsebd.org SSR + legacy table + bdshare merged for 100% coverage)
     live_df: pd.DataFrame | None = None
     try:
         live_df = get_current_trade_data()
     except Exception as exc:
         print(f"[bdshare] get_current_trade_data failed: {exc}")
 
-    if live_df is None or len(live_df) == 0:
-        live_df = home_board_df
-
     board_map: dict[str, dict[str, Any]] = {}
-    if live_df is not None and len(live_df) > 0:
-        df_norm = live_df.copy()
+    for df_source in (home_board_df, live_df):
+        if df_source is None or len(df_source) == 0:
+            continue
+        df_norm = df_source.copy()
         df_norm.columns = [str(c).lower().strip() for c in df_norm.columns]
         sym_col = "symbol" if "symbol" in df_norm.columns else (df_norm.columns[1] if len(df_norm.columns) > 1 else df_norm.columns[0])
         for _, row in df_norm.iterrows():
@@ -442,24 +553,38 @@ def build_post_market_snapshots() -> int:
             if ltp <= 0:
                 continue
             opn = _parse_float(row.get("open")) or ycp or ltp
+            vol = _parse_float(row.get("volume"))
+            prev_entry = board_map.get(sym)
+            # Prefer bdshare row when it carries real volume & OHLC range
+            if prev_entry and prev_entry.get("volume", 0) > 0 and vol <= 0:
+                continue
             board_map[sym] = {
                 "open": opn,
                 "high": max(_parse_float(row.get("high")), opn, ltp),
                 "low": min(_parse_float(row.get("low")) or ltp, opn, ltp),
                 "close": ltp,
                 "ycp": ycp,
-                "volume": _parse_float(row.get("volume")),
+                "volume": vol,
             }
 
-    # 3. Build candidate screening queue + core popular ticker cache queue
-    shortlist = rank_active_market_candidates(live_df) if live_df is not None else []
-    low_cands = [c["symbol"] for c in shortlist if MIN_STRONG_BUY_PRICE <= c["price"] < 100.0][:25]
-    high_cands = [c["symbol"] for c in shortlist if c["price"] >= 100.0][:25]
+    if len(board_map) < 300:
+        legacy_dse = fetch_dse_legacy_board()
+        for sym, row_q in legacy_dse.items():
+            if sym not in board_map or (board_map[sym].get("volume", 0) <= 0 and row_q.get("volume", 0) > 0):
+                board_map[sym] = row_q
 
+    if (live_df is None or len(live_df) == 0) and home_board_df is not None:
+        live_df = home_board_df
+
+    # 3. Run 17-feature XGBoost + 20-indicator engine across 100% of ALL DSE board symbols (no cap)
+    shortlist = rank_active_market_candidates(live_df) if live_df is not None else []
+    low_cands = [c["symbol"] for c in shortlist if MIN_STRONG_BUY_PRICE <= c["price"] < 100.0][:30]
+    high_cands = [c["symbol"] for c in shortlist if c["price"] >= 100.0][:30]
     screening_set = set(low_cands + high_cands)
+
     target_symbols: list[str] = []
     seen_targets: set[str] = set()
-    for sym in [*low_cands, *high_cands, *CORE_CACHE_SYMBOLS]:
+    for sym in [*low_cands, *high_cands, *sorted(board_map.keys()), *CORE_CACHE_SYMBOLS]:
         clean = sym.strip().upper()
         if clean and clean not in seen_targets:
             seen_targets.add(clean)
@@ -471,8 +596,8 @@ def build_post_market_snapshots() -> int:
     verified_strong_buys: list[dict[str, Any]] = []
     analyses_cache: dict[str, dict[str, Any]] = {}
 
-    print(f"Running 17-feature XGBoost + 20-indicator engine across {len(target_symbols)} active DSE tickers...")
-    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+    print(f"Running 17-feature XGBoost + 20-indicator engine across ALL {len(target_symbols)} DSE tickers...")
+    with concurrent.futures.ThreadPoolExecutor(max_workers=16) as executor:
         futures = [
             executor.submit(
                 _analyze_single_symbol,
@@ -480,6 +605,7 @@ def build_post_market_snapshots() -> int:
                 str(start_date),
                 str(end_date),
                 board_map,
+                trading_date,
             )
             for sym in target_symbols
         ]
@@ -521,14 +647,12 @@ def build_post_market_snapshots() -> int:
                     "is_sideways": full["is_sideways"],
                 })
 
-    # 4. Also enrich CSE closing quotes for core symbols when cse.com.bd is reachable
-    cse_board = fetch_cse_closing_board()
+    # 4. Run 17-feature XGBoost + 20-indicator engine across 100% of ALL CSE listed symbols
+    if not cse_board:
+        cse_board = fetch_cse_closing_board()
     if cse_board:
-        print(f"Fetched {len(cse_board)} CSE closing quotes.")
-        for sym in CORE_CACHE_SYMBOLS:
-            cse_q = cse_board.get(sym)
-            if not cse_q:
-                continue
+        print(f"Fetched {len(cse_board)} CSE closing quotes. Running XGBoost + 20-indicator engine on ALL CSE tickers...")
+        for sym, cse_q in cse_board.items():
             try:
                 base_dse = analyses_cache.get(f"DSE:{sym}")
                 if base_dse and base_dse.get("chart_history"):
@@ -560,21 +684,42 @@ def build_post_market_snapshots() -> int:
 
     picks = select_genuine_top_picks(verified_strong_buys)
 
-    # Preserve existing verified closing picks if upstream board had an outage and yielded 0 picks
-    if len(picks) == 0 and DAILY_PICKS_PATH.exists():
+    # Preserve existing verified closing picks if upstream board had an outage and yielded < 6 picks
+    if len(picks) < 6 and DAILY_PICKS_PATH.exists():
         try:
             existing = json.loads(DAILY_PICKS_PATH.read_text(encoding="utf-8"))
-            if isinstance(existing, dict) and existing.get("picks"):
-                picks = existing["picks"]
-                print("Preserved previous verified closing picks (0 new Strong Buys detected).")
+            existing_picks = existing.get("picks") if isinstance(existing, dict) else None
+            if isinstance(existing_picks, list) and existing_picks:
+                seen_pick_syms = {str(p.get("symbol", "")).strip().upper() for p in picks}
+                for prev_p in existing_picks:
+                    if not isinstance(prev_p, dict):
+                        continue
+                    prev_sym = str(prev_p.get("symbol", "")).strip().upper()
+                    if prev_sym and prev_sym not in seen_pick_syms:
+                        picks.append(prev_p)
+                        seen_pick_syms.add(prev_sym)
+                    if len(picks) >= 6:
+                        break
         except Exception:
             pass
 
-    if not indices["dsex"] and MARKET_SNAPSHOT_PATH.exists():
+    if MARKET_SNAPSHOT_PATH.exists():
         try:
             prev_snap = json.loads(MARKET_SNAPSHOT_PATH.read_text(encoding="utf-8"))
-            if isinstance(prev_snap, dict) and isinstance(prev_snap.get("indices"), dict):
-                indices = prev_snap["indices"]
+            prev_idx = prev_snap.get("indices") if isinstance(prev_snap, dict) else None
+            if isinstance(prev_idx, dict):
+                if not indices["dsex"] and prev_idx.get("dsex"):
+                    indices = prev_idx
+                else:
+                    if not indices["ds30"] and prev_idx.get("ds30"):
+                        indices["ds30"] = prev_idx["ds30"]
+                        indices["ds30_change"] = prev_idx.get("ds30_change", 0.0)
+                        indices["ds30_change_pct"] = prev_idx.get("ds30_change_pct", 0.0)
+                    if not indices["dses"] and prev_idx.get("dses"):
+                        indices["dses"] = prev_idx["dses"]
+                    if indices["dsex_change"] == 0.0 and prev_idx.get("dsex_change"):
+                        indices["dsex_change"] = prev_idx["dsex_change"]
+                        indices["dsex_change_pct"] = prev_idx.get("dsex_change_pct", 0.0)
         except Exception:
             pass
 
@@ -591,7 +736,7 @@ def build_post_market_snapshots() -> int:
     _atomic_write_json(MARKET_SNAPSHOT_PATH, market_snapshot)
     print(f"Saved market_snapshot.json (DSEX={indices.get('dsex')}, DS30={indices.get('ds30')}, picks={len(picks)})")
 
-    # 6. Write ml_analysis_cache.json (instant 0ms pre-computed /analyzer reports)
+    # 6. Write compact ml_analysis_cache.json (100% DSE/CSE pre-computed ML analyses, lightweight for Vercel CDN)
     if analyses_cache:
         ml_cache_payload = {
             "schema_version": 2,
@@ -600,8 +745,8 @@ def build_post_market_snapshots() -> int:
             "count": len(analyses_cache),
             "analyses": analyses_cache,
         }
-        _atomic_write_json(ML_ANALYSIS_CACHE_PATH, ml_cache_payload)
-        print(f"Saved ml_analysis_cache.json ({len(analyses_cache)} DSE/CSE pre-computed ML analyses)")
+        _atomic_write_json(ML_ANALYSIS_CACHE_PATH, ml_cache_payload, compact=True)
+        print(f"Saved compact ml_analysis_cache.json ({len(analyses_cache)} DSE/CSE pre-computed ML analyses)")
 
     # 7. Keep daily_picks.json synchronized for backwards compatibility
     if picks:
@@ -768,7 +913,17 @@ def build_remote_render_ml_snapshots() -> int:
         except Exception:
             pass
 
-    # 3. Sync real ML analyses for Top Picks + active liquid DSE/CSE catalog symbols
+    # 3. Sync real ML analyses for ALL DSE & CSE board symbols (no cap)
+    dse_board_syms: list[str] = []
+    if html:
+        unesc = html.replace('\\"', '"')
+        dse_board_syms = [
+            m.upper()
+            for m in re.findall(r'"code":"([A-Z0-9&().-]{1,20})","price":"[0-9.,]+"', unesc)
+            if SYMBOL_REGEX.match(m.upper())
+        ]
+    cse_board_remote = fetch_cse_closing_board()
+
     sync_symbols: list[str] = []
     seen_syms: set[str] = set()
     for p in picks:
@@ -776,18 +931,16 @@ def build_remote_render_ml_snapshots() -> int:
         if sym and sym not in seen_syms:
             seen_syms.add(sym)
             sync_symbols.append(sym)
-    for sym in CORE_CACHE_SYMBOLS:
+    for sym in [*dse_board_syms, *cse_board_remote.keys(), *CORE_CACHE_SYMBOLS]:
         clean = sym.strip().upper()
         if clean and clean not in seen_syms:
             seen_syms.add(clean)
             sync_symbols.append(clean)
 
-    # Fetch real ML analyses in parallel (cap to 50 core active symbols for fast build sync)
-    target_batch = sync_symbols[:50]
     analyses_cache: dict[str, dict[str, Any]] = {}
-    print(f"Syncing real XGBoost + 20-indicator analyses for {len(target_batch)} active DSE/CSE tickers...")
-    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
-        futures = [executor.submit(_fetch_live_render_analysis, sym, session) for sym in target_batch]
+    print(f"Syncing real XGBoost + 20-indicator analyses for ALL {len(sync_symbols)} DSE/CSE tickers...")
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        futures = [executor.submit(_fetch_live_render_analysis, sym, session) for sym in sync_symbols]
         for fut in concurrent.futures.as_completed(futures):
             sym, payload = fut.result()
             if payload:
@@ -814,8 +967,8 @@ def build_remote_render_ml_snapshots() -> int:
             "count": len(analyses_cache),
             "analyses": analyses_cache,
         }
-        _atomic_write_json(ML_ANALYSIS_CACHE_PATH, ml_cache_payload)
-        print(f"Saved ml_analysis_cache.json ({len(analyses_cache)} DSE/CSE pre-computed ML analyses under 'analyses')")
+        _atomic_write_json(ML_ANALYSIS_CACHE_PATH, ml_cache_payload, compact=True)
+        print(f"Saved compact ml_analysis_cache.json ({len(analyses_cache)} DSE/CSE pre-computed ML analyses under 'analyses')")
 
     if picks:
         daily_payload = {
