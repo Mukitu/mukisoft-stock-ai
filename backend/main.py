@@ -575,6 +575,35 @@ async def compute_daily_top_picks(force_refresh: bool = False) -> dict[str, Any]
         if live_df is not None:
             cache_set("top_picks_live", payload, ttl_seconds=120)
             save_persistent_picks(cycle_key, payload)
+            return payload
+
+        # If live DSE board is temporarily unreachable (weekend/maintenance), serve latest cached closing picks
+        if DAILY_CACHE_FILE.exists():
+            try:
+                saved = json.loads(DAILY_CACHE_FILE.read_text(encoding="utf-8"))
+                saved_data = saved.get("data") if isinstance(saved, dict) else None
+                if isinstance(saved_data, dict) and saved_data.get("picks"):
+                    fallback_out = dict(saved_data)
+                    fallback_out["session"] = session
+                    return fallback_out
+            except Exception as exc:
+                logger.warning("Fallback read of daily_picks_cache.json failed: %s", exc)
+
+        public_snapshot = BASE_DIR.parent / "public" / "assets" / "daily_picks.json"
+        if public_snapshot.exists():
+            try:
+                snap = json.loads(public_snapshot.read_text(encoding="utf-8"))
+                if isinstance(snap, dict) and snap.get("picks"):
+                    return {
+                        "schema_version": 2,
+                        "generated_at_bst": str(snap.get("generated_at_bst") or session["bd_time"]),
+                        "cycle_key": cycle_key,
+                        "session": session,
+                        "picks": snap["picks"],
+                    }
+            except Exception as exc:
+                logger.warning("Fallback read of public daily_picks.json failed: %s", exc)
+
         return payload
 
 

@@ -31,8 +31,8 @@ FEATURES_PATH = BASE_DIR / "model_features.json"
 with FEATURES_PATH.open("r", encoding="utf-8") as _f:
     FEATURE_COLS: list[str] = json.load(_f)
 
-_model = xgb.XGBClassifier()
-_model.load_model(str(MODEL_PATH))
+_booster = xgb.Booster()
+_booster.load_model(str(MODEL_PATH))
 
 SIGNAL_MAP = {
     0: "High Risk / Sell",
@@ -164,10 +164,13 @@ def compute_timeseries_indicators(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def predict_from_feature_frame(features_df: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
-    """Vectorized XGBoost prediction returning (predicted_classes, probabilities)."""
+    """Vectorized native XGBoost Booster prediction returning (predicted_classes, probabilities)."""
     x = features_df[FEATURE_COLS].astype(float)
-    preds = _model.predict(x).astype(int)
-    probs = _model.predict_proba(x)
+    dmat = xgb.DMatrix(x, feature_names=FEATURE_COLS)
+    probs = np.asarray(_booster.predict(dmat), dtype=float)
+    if probs.ndim == 1:
+        probs = probs.reshape(len(x), -1)
+    preds = np.argmax(probs, axis=1).astype(int)
     return preds, probs
 
 

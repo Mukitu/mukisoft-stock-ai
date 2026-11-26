@@ -1,11 +1,14 @@
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useEffect } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Exchange, ManualStockPayload } from '../types/market';
 import {
   analyzeDocuments,
   analyzeManualStock,
   analyzeStock,
+  fetchLiveTopPicksFromApi,
   fetchMarketLive,
   fetchTopPicks,
+  readCachedTopPicks,
 } from '../services/apiClient';
 import { getBDMarketSession } from '../utils/bdMarketSession';
 import { QuotaExceededError } from '../services/quotaService';
@@ -22,13 +25,33 @@ export function useMarketLive() {
 
 export function useTopPicks() {
   const session = getBDMarketSession();
-  return useQuery({
-    queryKey: ['top-picks', session.mode],
+  const queryClient = useQueryClient();
+  const queryKey = ['top-picks', session.mode] as const;
+
+  const query = useQuery({
+    queryKey,
     queryFn: fetchTopPicks,
+    initialData: () => readCachedTopPicks() ?? undefined,
     staleTime: session.is_live ? 120_000 : 15 * 60_000,
-    retry: 2,
-    retryDelay: 2_500,
+    retry: 1,
+    retryDelay: 1_500,
   });
+
+  // Always refresh live Render picks silently in the background while cards are already visible
+  useEffect(() => {
+    let active = true;
+    void fetchLiveTopPicksFromApi(28_000).then((liveResult) => {
+      if (active && liveResult && liveResult.picks.length > 0) {
+        queryClient.setQueryData(queryKey, liveResult);
+      }
+    });
+    return () => {
+      active = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session.mode]);
+
+  return query;
 }
 
 export function useStockAnalysis(symbol: string, exchange: Exchange, enabled = true) {

@@ -189,15 +189,45 @@ export async function fetchMarketLive(): Promise<MarketLiveTicker> {
   };
 }
 
-async function fetchLiveTopPicksFromApi(timeoutMs = 28_000): Promise<TopPicksResponse | null> {
+export const TOP_PICKS_CACHE_KEY = 'ms_top_picks_cache_v2';
+
+export function readCachedTopPicks(): TopPicksResponse | null {
+  try {
+    const raw = window.localStorage.getItem(TOP_PICKS_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<TopPicksResponse> | null;
+    if (!parsed || typeof parsed !== 'object') return null;
+    const verified = sanitizeVerifiedTopPicks(parsed.picks);
+    if (verified.length === 0) return null;
+    return {
+      generated_at_bst: String(parsed.generated_at_bst || getBDMarketSession().bd_time),
+      source: parsed.source === 'live_api' ? 'live_api' : 'daily_snapshot',
+      live_unavailable: false,
+      picks: verified,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function saveCachedTopPicks(payload: TopPicksResponse): void {
+  if (!payload.picks || payload.picks.length === 0) return;
+  try {
+    window.localStorage.setItem(TOP_PICKS_CACHE_KEY, JSON.stringify(payload));
+  } catch {
+    // Ignore storage quota errors
+  }
+}
+
+export async function fetchLiveTopPicksFromApi(timeoutMs = 28_000): Promise<TopPicksResponse | null> {
   const session = getBDMarketSession();
   try {
     const res = await fetchWithTimeout(`${API_BASE_URL}/api/top-picks`, {}, timeoutMs);
     if (!res.ok) return null;
     const data = await res.json();
     const verified = sanitizeVerifiedTopPicks(data?.picks);
-    if (verified.length > 0 || Number(data?.schema_version) >= 2) {
-      return {
+    if (verified.length > 0) {
+      const result: TopPicksResponse = {
         generated_at_bst: String(
           data?.generated_at_bst || data?.session?.bd_time || session.bd_time
         ),
@@ -205,6 +235,8 @@ async function fetchLiveTopPicksFromApi(timeoutMs = 28_000): Promise<TopPicksRes
         live_unavailable: false,
         picks: verified,
       };
+      saveCachedTopPicks(result);
+      return result;
     }
   } catch {
     // Cold-start or transient network timeout
@@ -215,31 +247,29 @@ async function fetchLiveTopPicksFromApi(timeoutMs = 28_000): Promise<TopPicksRes
 export async function fetchTopPicks(): Promise<TopPicksResponse> {
   const session = getBDMarketSession();
 
-  // During live market hours (Sun-Thu 10:00 AM-2:30 PM BST), fetch live API first
-  if (session.is_live) {
-    const liveResult = await fetchLiveTopPicksFromApi(28_000);
-    if (liveResult) {
-      return liveResult;
-    }
+  // 1. Instant 0ms localStorage cache from latest verified session (if present)
+  const localCached = readCachedTopPicks();
+  if (localCached && localCached.picks.length > 0) {
+    return localCached;
   }
 
-  // Outside live hours (after 3:00 PM BST lock), serve instant 0ms verified daily snapshot
+  // 2. Instant (~15ms) latest closing DSE/CSE snapshot from /assets/daily_picks.json
   const snapshot = await loadLockedDailySnapshot();
-  if (snapshot) {
-    return {
+  if (snapshot && snapshot.picks.length > 0) {
+    const out: TopPicksResponse = {
       generated_at_bst: snapshot.generated_at_bst,
       source: 'daily_snapshot',
       live_unavailable: false,
       picks: snapshot.picks,
     };
+    saveCachedTopPicks(out);
+    return out;
   }
 
-  // Live API fetch if daily_picks.json hasn't been populated for this cycle yet
-  if (!session.is_live) {
-    const liveResult = await fetchLiveTopPicksFromApi(28_000);
-    if (liveResult) {
-      return liveResult;
-    }
+  // 3. Fallback to live API only if neither cache nor daily_picks.json had picks
+  const liveResult = await fetchLiveTopPicksFromApi(28_000);
+  if (liveResult) {
+    return liveResult;
   }
 
   return {
