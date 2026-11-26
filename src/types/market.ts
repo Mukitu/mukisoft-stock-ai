@@ -70,7 +70,8 @@ export interface StockAnalysis {
   ai_analysis_bn: string;
   chart_history: OhlcvPoint[];
   data_source: string;
-  is_fallback?: boolean;
+  volume?: number;
+  vol_ratio?: number;
 }
 
 export interface TopPick {
@@ -78,14 +79,19 @@ export interface TopPick {
   exchange: Exchange;
   price: number;
   change_pct: number;
+  volume?: number;
+  vol_ratio?: number;
   signal_code: number;
+  ml_signal_code?: number;
   signal: string;
   confidence: number;
   buy_score: number;
   target_price: number;
   stop_loss: number;
   rsi: number;
-  bull_votes?: number;
+  bull_votes: number;
+  total_votes?: number;
+  is_sideways?: boolean;
 }
 
 export interface MarketSessionInfo {
@@ -109,7 +115,8 @@ export interface MarketLiveTicker {
 
 export interface TopPicksResponse {
   generated_at_bst: string;
-  source: 'live_api' | 'daily_snapshot';
+  source: 'live_api' | 'daily_snapshot' | 'unavailable';
+  live_unavailable?: boolean;
   picks: TopPick[];
 }
 

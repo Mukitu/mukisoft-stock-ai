@@ -30,12 +30,15 @@ from pydantic import BaseModel, Field, model_validator
 from pypdf import PdfReader
 
 from quant_engine import (
+    MIN_STRONG_BUY_PRICE,
+    MIN_STRONG_BUY_VOTES,
     analyze_ohlcv_dataframe,
     build_manual_ohlcv_frame,
+    compute_real_buy_score,
     get_bd_market_session,
     get_bst_now,
     get_market_cycle_key,
-    score_snapshot_batch,
+    rank_active_market_candidates,
     select_genuine_top_picks,
 )
 
@@ -346,44 +349,56 @@ async def compute_daily_top_picks(force_refresh: bool = False) -> dict[str, Any]
             return out
 
     live_df = await asyncio.to_thread(_fetch_bdshare_board_sync)
-    shortlist = score_snapshot_batch(live_df) if live_df is not None else []
+    shortlist = rank_active_market_candidates(live_df) if live_df is not None else []
 
     verified: list[dict[str, Any]] = []
-    # Verify top shortlisted candidates with full 90-day history & 20-indicator consensus
-    low_cands = [c for c in shortlist if 12.0 <= c["price"] < 100.0][:10]
-    high_cands = [c for c in shortlist if c["price"] >= 100.0][:10]
+    # Verify top active positive-momentum liquid candidates with genuine 90-day history & 20-indicator consensus
+    low_cands = [c for c in shortlist if MIN_STRONG_BUY_PRICE <= c["price"] < 100.0][:20]
+    high_cands = [c for c in shortlist if c["price"] >= 100.0][:20]
 
     for cand in low_cands + high_cands:
         hist_df = await asyncio.to_thread(_fetch_bdshare_history_sync, cand["symbol"])
         if hist_df is None:
             continue
-        full = analyze_ohlcv_dataframe(cand["symbol"], "DSE", hist_df, "90D Verified Strong Buy")
-        if full["signal_code"] == 2 and full["bull_votes"] >= 16 and not full["is_sideways"]:
+        full = analyze_ohlcv_dataframe(cand["symbol"], "DSE", hist_df, "90D Real-Time Verified Strong Buy")
+        if (
+            full["signal_code"] == 2
+            and full["ml_signal_code"] == 2
+            and full["bull_votes"] >= MIN_STRONG_BUY_VOTES
+            and not full["is_sideways"]
+            and full["current_price"] >= MIN_STRONG_BUY_PRICE
+            and full["change_pct"] > 0.0
+            and full["volume"] > 0
+        ):
             verified.append({
                 "symbol": full["symbol"],
                 "exchange": "DSE",
                 "price": full["current_price"],
                 "change_pct": full["change_pct"],
+                "volume": full["volume"],
+                "vol_ratio": full["vol_ratio"],
                 "signal_code": full["signal_code"],
                 "ml_signal_code": full["ml_signal_code"],
                 "signal": full["signal"],
                 "confidence": full["confidence"],
-                "buy_score": round(full["confidence"] + full["bull_votes"], 2),
+                "buy_score": compute_real_buy_score(full),
                 "target_price": full["target_price"],
                 "stop_loss": full["stop_loss"],
                 "rsi": full["rsi"],
                 "bull_votes": full["bull_votes"],
+                "total_votes": full["total_votes"],
                 "is_sideways": full["is_sideways"],
             })
 
     picks = select_genuine_top_picks(verified)
     payload = {
+        "schema_version": 2,
         "generated_at_bst": get_bst_now().strftime("%d %b %Y, %I:%M %p"),
         "cycle_key": cycle_key,
         "session": session,
         "picks": picks,
     }
-    if picks:
+    if live_df is not None:
         save_persistent_picks(cycle_key, payload)
     return payload
 

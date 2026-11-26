@@ -4,6 +4,7 @@ import {
   Check,
   ExternalLink,
   FileUp,
+  RefreshCw,
   Trash2,
   TrendingUp,
 } from 'lucide-react';
@@ -16,17 +17,22 @@ import {
 } from '../hooks/useMarketQueries';
 import { PriceMovementChart } from '../components/charts/PriceMovementChart';
 import { BanglaReportCard } from '../components/common/BanglaReportCard';
+import { LIVE_FEED_WAITING_BN } from '../services/apiClient';
+import {
+  formatStrongBuyConsensusLine,
+  toBanglaDigits,
+} from '../utils/quantConsensus';
 
 const SECTOR_NAMES = Object.keys(DSE_CSE_SECTORS);
 
 export function AnalyzerPage() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const initialSymbol = (searchParams.get('symbol') || 'SQURPHARMA').trim().toUpperCase();
+  const initialSymbol = (searchParams.get('symbol') || '').trim().toUpperCase();
   const initialExchange: Exchange = searchParams.get('exchange')?.toUpperCase() === 'CSE' ? 'CSE' : 'DSE';
 
   const [exchange, setExchange] = useState<Exchange>(initialExchange);
   const [selectedSector, setSelectedSector] = useState<string>(() => {
-    const found = findSectorBySymbol(initialSymbol);
+    const found = initialSymbol ? findSectorBySymbol(initialSymbol) : '';
     return SECTOR_NAMES.includes(found) ? found : SECTOR_NAMES[0];
   });
   const [symbolInput, setSymbolInput] = useState<string>(initialSymbol);
@@ -54,11 +60,13 @@ export function AnalyzerPage() {
 
   const [actionFeedback, setActionFeedback] = useState<string | null>(null);
 
-  const { data: liveAnalysis, isFetching } = useStockAnalysis(
-    activeQuery.symbol,
-    activeQuery.exchange,
-    true
-  );
+  const {
+    data: liveAnalysis,
+    isFetching,
+    isError,
+    error: queryError,
+    refetch,
+  } = useStockAnalysis(activeQuery.symbol, activeQuery.exchange, activeQuery.symbol.length > 0);
   const manualMutation = useManualAnalysisMutation();
   const docMutation = useDocumentAnalysisMutation();
 
@@ -151,18 +159,22 @@ export function AnalyzerPage() {
       return;
     }
 
-    const res = await manualMutation.mutateAsync({
-      symbol: symbolInput.trim().toUpperCase() || 'STOCK',
-      exchange,
-      open_price: o,
-      high_price: h,
-      low_price: l,
-      close_price: c,
-      yesterday_close: ycp,
-      volume: vol,
-    });
-    setOverrideAnalysis(res);
-    setActionFeedback('ম্যানুয়াল OHLCV বিশ্লেষণ সম্পন্ন হয়েছে।');
+    try {
+      const res = await manualMutation.mutateAsync({
+        symbol: symbolInput.trim().toUpperCase() || 'STOCK',
+        exchange,
+        open_price: o,
+        high_price: h,
+        low_price: l,
+        close_price: c,
+        yesterday_close: ycp,
+        volume: vol,
+      });
+      setOverrideAnalysis(res);
+      setActionFeedback('ম্যানুয়াল OHLCV বিশ্লেষণ সম্পন্ন হয়েছে।');
+    } catch (err) {
+      setManualError(err instanceof Error ? err.message : LIVE_FEED_WAITING_BN);
+    }
   };
 
   const signalColorClass =
@@ -172,12 +184,13 @@ export function AnalyzerPage() {
         ? 'text-rose-700'
         : 'text-amber-700';
 
-  const dseCompanyUrl = `https://www.dsebd.org/displayCompany.php?name=${encodeURIComponent(
-    symbolInput.trim().toUpperCase() || 'SQURPHARMA'
-  )}`;
-  const cseCompanyUrl = `https://www.cse.com.bd/company/companydetails/${encodeURIComponent(
-    symbolInput.trim().toUpperCase() || 'SQURPHARMA'
-  )}`;
+  const cleanUrlSym = symbolInput.trim().toUpperCase();
+  const dseCompanyUrl = cleanUrlSym
+    ? `https://www.dsebd.org/displayCompany.php?name=${encodeURIComponent(cleanUrlSym)}`
+    : 'https://www.dsebd.org/latest_share_price_scroll_l.php';
+  const cseCompanyUrl = cleanUrlSym
+    ? `https://www.cse.com.bd/company/companydetails/${encodeURIComponent(cleanUrlSym)}`
+    : 'https://www.cse.com.bd/market/current_price';
 
   return (
     <main className="max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 flex-1 space-y-6">
@@ -490,12 +503,48 @@ export function AnalyzerPage() {
       )}
 
       {/* Results Dashboard */}
-      {isFetching && !currentAnalysis ? (
+      {!activeQuery.symbol && !currentAnalysis ? (
+        <div className="bg-white border border-slate-200 rounded-xl p-10 text-center space-y-2.5">
+          <p className="text-sm font-bold text-slate-900">
+            লাইভ DSE / CSE কোয়ান্টিটেটিভ বিশ্লেষণ শুরু করুন
+          </p>
+          <p className="text-xs text-slate-600 max-w-lg mx-auto leading-relaxed">
+            উপরের সেক্টর ও কোম্পানি তালিকা থেকে যেকোনো শেয়ার বাছাই করুন অথবা ট্রেডিং কোড লিখে “বিশ্লেষণ শুরু করুন” বাটনে ক্লিক করুন।
+          </p>
+        </div>
+      ) : isFetching && !currentAnalysis ? (
         <div className="bg-white border border-slate-200 rounded-xl p-12 text-center space-y-3">
           <div className="w-9 h-9 border-4 border-blue-700 border-t-transparent rounded-full animate-spin mx-auto" />
-          <p className="text-sm font-semibold text-slate-800">
-            {activeQuery.symbol} ({activeQuery.exchange})-এর ডেটা ও ২০টি সূচক বিশ্লেষণ করা হচ্ছে...
+          <p className="text-sm font-semibold text-slate-800">{LIVE_FEED_WAITING_BN}</p>
+          <p className="text-xs text-slate-500">
+            {activeQuery.symbol} ({activeQuery.exchange})-এর রিয়েল-টাইম ঐতিহাসিক ডেটা ও ২০টি সূচক যাচাই চলছে।
           </p>
+        </div>
+      ) : isError && !currentAnalysis ? (
+        <div className="bg-white border border-slate-200 rounded-xl p-10 text-center space-y-4">
+          <p className="text-sm font-semibold text-slate-800">
+            {queryError instanceof Error ? queryError.message : LIVE_FEED_WAITING_BN}
+          </p>
+          <p className="text-xs text-slate-500 max-w-lg mx-auto">
+            আমরা কোনো ডেমো বা অনুমানভিত্তিক প্রাইস দেখাই না। কয়েক মুহূর্ত পর আবার চেষ্টা করুন অথবা ডকুমেন্ট OCR / ম্যানুয়াল OHLCV ইনপুট ব্যবহার করুন।
+          </p>
+          <div className="flex flex-wrap items-center justify-center gap-3">
+            <button
+              type="button"
+              onClick={() => void refetch()}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-blue-700 hover:bg-blue-800 text-white text-xs font-semibold cursor-pointer"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>আবার চেষ্টা করুন</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowAdvancedInput(true)}
+              className="px-4 py-2 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 text-xs font-semibold cursor-pointer"
+            >
+              ডকুমেন্ট OCR / ম্যানুয়াল ইনপুট খুলুন
+            </button>
+          </div>
         </div>
       ) : currentAnalysis ? (
         <div className="space-y-6">
@@ -503,9 +552,6 @@ export function AnalyzerPage() {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="text-xs text-slate-500">
               উৎস: <strong className="text-slate-800">{currentAnalysis.data_source}</strong>
-              {currentAnalysis.is_fallback && (
-                <span> · লাইভ সার্ভার ওয়েক-আপ না হওয়া পর্যন্ত স্ন্যাপশট বিশ্লেষণ দেখানো হচ্ছে</span>
-              )}
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <Link
@@ -548,12 +594,16 @@ export function AnalyzerPage() {
 
             <div className="bg-white border border-slate-200 p-5 rounded-xl">
               <div className="text-xs text-slate-500">ইউনিফায়েড কনসেনসাস সিগন্যাল</div>
-              <div className={`text-lg font-bold mt-2 leading-snug ${signalColorClass}`}>
+              <div className={`text-base font-bold mt-2 leading-snug ${signalColorClass}`}>
                 {currentAnalysis.signal}
               </div>
-              <div className="text-xs text-slate-500 mt-2 font-mono-num">
-                কনফিডেন্স: <strong className="text-slate-900">{currentAnalysis.confidence.toFixed(1)}%</strong> ·{' '}
-                {currentAnalysis.bull_votes}/{currentAnalysis.total_votes} বুলিশ
+              <div className="text-[11px] font-semibold text-slate-700 mt-1.5 leading-snug">
+                {currentAnalysis.action_type === 'BUY'
+                  ? formatStrongBuyConsensusLine(currentAnalysis.bull_votes)
+                  : `২০টি সূচকের মধ্যে ${toBanglaDigits(currentAnalysis.bull_votes)}টি ইতিবাচক সিদ্ধান্ত`}
+              </div>
+              <div className="text-[11px] text-slate-500 mt-1 font-mono-num">
+                কনফিডেন্স: <strong className="text-slate-900">{currentAnalysis.confidence.toFixed(1)}%</strong>
               </div>
             </div>
 

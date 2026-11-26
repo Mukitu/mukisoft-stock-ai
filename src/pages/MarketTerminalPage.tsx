@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { RotateCcw } from 'lucide-react';
+import { Loader2, RefreshCw, RotateCcw } from 'lucide-react';
 import type { Exchange } from '../types/market';
 import { DSE_CSE_SECTORS, findSectorBySymbol } from '../data/symbolCatalog';
 import { useStockAnalysis } from '../hooks/useMarketQueries';
@@ -9,17 +9,18 @@ import {
   type TerminalIndicatorToggles,
 } from '../components/charts/TradingViewTerminal';
 import { buildStructuredBanglaReport } from '../utils/quantConsensus';
+import { LIVE_FEED_WAITING_BN } from '../services/apiClient';
 
 const SECTOR_NAMES = Object.keys(DSE_CSE_SECTORS);
 
 export function MarketTerminalPage() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const initialSymbol = (searchParams.get('symbol') || 'SQURPHARMA').trim().toUpperCase();
+  const initialSymbol = (searchParams.get('symbol') || '').trim().toUpperCase();
   const initialExchange: Exchange = searchParams.get('exchange')?.toUpperCase() === 'CSE' ? 'CSE' : 'DSE';
 
   const [exchange, setExchange] = useState<Exchange>(initialExchange);
   const [sector, setSector] = useState<string>(() => {
-    const found = findSectorBySymbol(initialSymbol);
+    const found = initialSymbol ? findSectorBySymbol(initialSymbol) : '';
     return SECTOR_NAMES.includes(found) ? found : SECTOR_NAMES[0];
   });
   const [symbol, setSymbol] = useState<string>(initialSymbol);
@@ -33,7 +34,13 @@ export function MarketTerminalPage() {
     rsi: true,
   });
 
-  const { data: analysis, isFetching } = useStockAnalysis(symbol, exchange, true);
+  const {
+    data: analysis,
+    isFetching,
+    isError,
+    error: queryError,
+    refetch,
+  } = useStockAnalysis(symbol, exchange, symbol.length > 0);
   const report = analysis ? buildStructuredBanglaReport(analysis) : null;
 
   const updateSelection = (nextSym: string, nextExch: Exchange) => {
@@ -109,9 +116,12 @@ export function MarketTerminalPage() {
             <select
               id="tv-pair"
               value={symbol}
-              onChange={(e) => updateSelection(e.target.value, exchange)}
+              onChange={(e) => {
+                if (e.target.value) updateSelection(e.target.value, exchange);
+              }}
               className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-sm font-medium text-slate-900 outline-none focus:border-blue-700"
             >
+              <option value="">-- কোম্পানি নির্বাচন করুন --</option>
               {(DSE_CSE_SECTORS[sector] || []).map((sym) => (
                 <option key={sym} value={sym}>
                   {sym} / BDT ({exchange})
@@ -169,13 +179,13 @@ export function MarketTerminalPage() {
         <div className="bg-white border border-slate-200 p-4 rounded-xl">
           <div className="text-[11px] text-slate-500">নির্বাচিত পেয়ার</div>
           <div className="text-base font-bold text-blue-700 mt-0.5 truncate">
-            {symbol} / BDT ({exchange})
+            {symbol ? `${symbol} / BDT (${exchange})` : 'কোম্পানি বাছাই করুন'}
           </div>
         </div>
         <div className="bg-white border border-slate-200 p-4 rounded-xl">
           <div className="text-[11px] text-slate-500">বর্তমান দর</div>
           <div className="text-base font-bold text-slate-900 font-mono-num mt-0.5">
-            {analysis ? `৳ ${analysis.current_price.toFixed(2)}` : isFetching ? 'লোড হচ্ছে...' : '—'}
+            {analysis ? `৳ ${analysis.current_price.toFixed(2)}` : isFetching ? 'সংগ্রহ হচ্ছে...' : '—'}
           </div>
         </div>
         <div className="bg-white border border-slate-200 p-4 rounded-xl">
@@ -211,7 +221,7 @@ export function MarketTerminalPage() {
         <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500 px-1">
           <div className="flex flex-wrap items-center gap-3">
             <strong className="text-slate-900">
-              {symbol} ({exchange}) — Technical Candlestick Terminal
+              {symbol ? `${symbol} (${exchange}) — Technical Candlestick Terminal` : 'DSE / CSE Technical Candlestick Terminal'}
             </strong>
             <span className="text-amber-600 font-semibold">SMA(20)</span>
             <span className="text-sky-600 font-semibold">EMA(20)</span>
@@ -220,11 +230,36 @@ export function MarketTerminalPage() {
           <span>মাউস হুইল দিয়ে জুম ও ড্র্যাগ করে স্ক্রল করুন</span>
         </div>
 
-        <TradingViewTerminal
-          ohlcv={analysis?.chart_history || []}
-          toggles={toggles}
-          resetSignal={resetCounter}
-        />
+        {!symbol ? (
+          <div className="py-16 text-center text-sm text-slate-600">
+            লাইভ ক্যান্ডেলস্টিক চার্ট ও সূচক দেখতে উপরের তালিকা থেকে একটি কোম্পানি নির্বাচন করুন।
+          </div>
+        ) : isFetching && !analysis ? (
+          <div className="py-16 text-center space-y-3">
+            <Loader2 className="w-8 h-8 text-blue-700 animate-spin mx-auto" />
+            <p className="text-sm font-semibold text-slate-800">{LIVE_FEED_WAITING_BN}</p>
+          </div>
+        ) : isError && !analysis ? (
+          <div className="py-14 text-center space-y-3">
+            <p className="text-sm font-semibold text-slate-800">
+              {queryError instanceof Error ? queryError.message : LIVE_FEED_WAITING_BN}
+            </p>
+            <button
+              type="button"
+              onClick={() => void refetch()}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-blue-700 hover:bg-blue-800 text-white text-xs font-semibold cursor-pointer"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>আবার চেষ্টা করুন</span>
+            </button>
+          </div>
+        ) : (
+          <TradingViewTerminal
+            ohlcv={analysis?.chart_history || []}
+            toggles={toggles}
+            resetSignal={resetCounter}
+          />
+        )}
       </section>
 
       {/* Quick Bangla AI Summary */}
@@ -232,7 +267,7 @@ export function MarketTerminalPage() {
         <section className="bg-white border border-slate-200 p-6 rounded-xl flex flex-col md:flex-row md:items-center justify-between gap-5">
           <div className="space-y-1.5">
             <div className="text-xs font-semibold text-blue-700">
-              MukiSoft AI কুইক ট্রেড সামারি · {analysis.bull_votes}/{analysis.total_votes} বুলিশ
+              {report.consensusVerdictLine}
             </div>
             <h2 className="text-base font-bold text-slate-900">{report.decisionTitle}</h2>
             <p className="text-sm text-slate-700 leading-relaxed">{report.decisionSummary}</p>

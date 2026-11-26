@@ -1,6 +1,15 @@
 """
 MukiSoft AI — Unified Quantitative ML & 20-Indicator Consensus Engine.
 Single source of truth imported by both backend/main.py and scripts/generate_daily_picks.py.
+
+Strict Zero-Demo, 100% Real-Time Rules:
+- Zero hardcoded/mock/synthetic stocks or fabricated linear RSI/return approximations.
+- Strong Buy requires simultaneously:
+    1. Genuine XGBoost ML prediction signal_code == 2 (from real 90D computed time-series features)
+    2. At least 15 out of 20 bullish technical indicator votes (15/20 to 20/20)
+    3. Non-sideways market regime (is_sideways == False)
+    4. Active price & momentum (price >= 12.0 BDT, change_pct > 0, volume > 0)
+- Never relabels Hold or Sideways stocks into Strong Buy.
 """
 
 from __future__ import annotations
@@ -31,6 +40,9 @@ SIGNAL_MAP = {
     2: "Strong Buy",
 }
 
+MIN_STRONG_BUY_VOTES = 15
+MIN_STRONG_BUY_PRICE = 12.0
+
 
 def get_bst_now() -> dt.datetime:
     return dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=6)
@@ -44,7 +56,7 @@ def get_market_cycle_key(now: dt.datetime | None = None) -> str:
         if current.hour < 15
         else current.strftime("%Y-%m-%d")
     )
-    return f"cycle_{cycle_date}_1500_bst_v2"
+    return f"cycle_{cycle_date}_1500_bst_v3"
 
 
 def get_bd_market_session(now: dt.datetime | None = None) -> dict[str, Any]:
@@ -92,7 +104,11 @@ def compute_timeseries_indicators(df: pd.DataFrame) -> pd.DataFrame:
         data = data.sort_values("date").reset_index(drop=True)
 
     close = data["close"].astype(float)
-    volume = data["volume"].fillna(0.0).astype(float) if "volume" in data.columns else pd.Series(0.0, index=data.index)
+    volume = (
+        data["volume"].fillna(0.0).astype(float)
+        if "volume" in data.columns
+        else pd.Series(0.0, index=data.index)
+    )
 
     # Moving averages
     data["sma_20"] = close.rolling(window=20, min_periods=1).mean()
@@ -138,7 +154,11 @@ def compute_timeseries_indicators(df: pd.DataFrame) -> pd.DataFrame:
     data["bb_pos"] = ((close - data["bb_low"]) / bb_span).fillna(0.5)
 
     for col in FEATURE_COLS:
-        data[col] = pd.to_numeric(data[col], errors="coerce").replace([np.inf, -np.inf], np.nan).fillna(0.0)
+        data[col] = (
+            pd.to_numeric(data[col], errors="coerce")
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0)
+        )
 
     return data
 
@@ -158,7 +178,8 @@ def evaluate_20_indicator_consensus(
 ) -> dict[str, Any]:
     """
     Unified 20-indicator quantitative consensus engine synchronized with XGBoost ML.
-    Computes genuine SMA/EMA/RSI/MACD/Bollinger/Stochastic/Williams/ROC/CCI/ATR/S-R levels.
+    Requires ML Strong Buy (signal_code == 2) AND >= 15/20 bullish indicators AND non-sideways
+    to emit 'এখনই বাই করতে পারেন (Strong Buy)'.
     """
     closes = df["close"].astype(float).tolist()
     highs = df["high"].astype(float).tolist() if "high" in df.columns else closes
@@ -271,10 +292,10 @@ def evaluate_20_indicator_consensus(
         action_type = "SIDEWAYS"
         signal_code = 1
         badge_bn = "সাইডওয়ে মার্কেট — এড়িয়ে চলুন (Sideways)"
-    elif ml_signal_code == 2 and bull_count >= 16:
+    elif ml_signal_code == 2 and bull_count >= MIN_STRONG_BUY_VOTES:
         action_type = "BUY"
         signal_code = 2
-        badge_bn = "এখন কিনতে পারেন (Strong Buy)"
+        badge_bn = "এখনই বাই করতে পারেন (Strong Buy)"
     elif ml_signal_code == 0 or bear_count >= 12:
         action_type = "SELL"
         signal_code = 0
@@ -342,6 +363,8 @@ def analyze_ohlcv_dataframe(
     prev_close = float(enriched_df.iloc[-2]["close"]) if len(enriched_df) >= 2 else float(latest["open"])
     current_price = round(float(latest["close"]), 2)
     change_pct = round(((current_price - prev_close) / max(prev_close, 1e-9)) * 100.0, 2)
+    latest_volume = int(max(0.0, float(latest.get("volume", 0.0) or 0.0)))
+    vol_ratio = round(float(latest.get("vol_ratio", 1.0) or 1.0), 2)
 
     tail = enriched_df.tail(60)
     ohlcv_history = []
@@ -363,6 +386,8 @@ def analyze_ohlcv_dataframe(
         "exchange": exchange,
         "current_price": current_price,
         "change_pct": change_pct,
+        "volume": latest_volume,
+        "vol_ratio": vol_ratio,
         "signal": consensus["signal"],
         "signal_code": consensus["signal_code"],
         "action_type": consensus["action_type"],
@@ -416,43 +441,68 @@ def build_manual_ohlcv_frame(
     return pd.DataFrame(rows)
 
 
+def compute_real_buy_score(analysis: dict[str, Any]) -> float:
+    """
+    Ranks genuine Strong Buy stocks strictly by:
+    - Real bullish indicator consensus count (15..20)
+    - Real XGBoost ML confidence
+    - Real positive intraday momentum & relative volume ratio
+    """
+    bull_votes = int(analysis.get("bull_votes", 0))
+    confidence = float(analysis.get("confidence", 0.0))
+    change_pct = max(0.0, float(analysis.get("change_pct", 0.0)))
+    vol_ratio = min(4.0, max(0.5, float(analysis.get("vol_ratio", 1.0))))
+    return round(bull_votes * 10.0 + confidence + change_pct * 3.0 + vol_ratio * 4.0, 2)
+
+
 def select_genuine_top_picks(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """
-    Strictly select ONLY genuine Strong Buy stocks (ML signal_code == 2,
-    >= 16/20 bullish votes, non-sideways, price >= 12 BDT).
-    Never relabels Hold or Sideways stocks as Strong Buy.
-    Returns up to 3 lowest-priced (< 100 BDT) + up to 3 mid/large-cap (>= 100 BDT).
+    Strictly select ONLY genuine Strong Buy stocks passing EVERY real-time filter:
+      1. price >= 12.0 BDT, positive intraday momentum (change_pct > 0), non-sideways, volume > 0
+      2. ML Strong Buy verdict (ml_signal_code == 2 and signal_code == 2)
+      3. 15 to 20 bullish technical indicator votes (15 <= bull_votes <= 20)
+      4. Never relabels Hold/Sideways stocks and never excludes genuine consecutive-day top stocks.
+    Selects up to 3 lowest-priced (12–99.99 BDT) + up to 3 mid/large-cap (>= 100 BDT),
+    ranked from highest bullish indicator count & buying momentum downward.
     """
     genuine = [
         c for c in candidates
-        if c.get("signal_code") == 2
-        and c.get("ml_signal_code", 2) == 2
-        and not c.get("is_sideways", False)
-        and int(c.get("bull_votes", 0)) >= 16
-        and float(c.get("price", 0)) >= 12.0
+        if int(c.get("signal_code", 1)) == 2
+        and int(c.get("ml_signal_code", 1)) == 2
+        and not bool(c.get("is_sideways", False))
+        and MIN_STRONG_BUY_VOTES <= int(c.get("bull_votes", 0)) <= 20
+        and float(c.get("price", 0.0)) >= MIN_STRONG_BUY_PRICE
+        and float(c.get("change_pct", 0.0)) > 0.0
+        and float(c.get("volume", 1.0)) > 0.0
     ]
 
+    def rank_key(item: dict[str, Any]) -> tuple[int, float, float, float]:
+        return (
+            -int(item.get("bull_votes", 0)),
+            -float(item.get("buy_score", 0.0)),
+            -float(item.get("vol_ratio", 1.0)),
+            -float(item.get("change_pct", 0.0)),
+        )
+
     low_three = sorted(
-        [c for c in genuine if 12.0 <= float(c["price"]) < 100.0],
-        key=lambda x: (float(x["price"]), -float(x.get("buy_score", 0))),
+        [c for c in genuine if MIN_STRONG_BUY_PRICE <= float(c["price"]) < 100.0],
+        key=rank_key,
     )[:3]
 
     high_three = sorted(
-        sorted(
-            [c for c in genuine if float(c["price"]) >= 100.0],
-            key=lambda x: float(x.get("buy_score", 0)),
-            reverse=True,
-        )[:3],
-        key=lambda x: float(x["price"]),
-    )
+        [c for c in genuine if float(c["price"]) >= 100.0],
+        key=rank_key,
+    )[:3]
 
     return low_three + high_three
 
 
-def score_snapshot_batch(live_df: pd.DataFrame) -> list[dict[str, Any]]:
+def rank_active_market_candidates(live_df: pd.DataFrame) -> list[dict[str, Any]]:
     """
-    Vectorized batch scoring of the live trade board to shortlist high-momentum
-    candidates for full 90-day historical verification.
+    Pure real-time market liquidity & momentum pre-filter on the live DSE trade board.
+    Zero fabricated linear RSI/MACD approximations — strictly filters active stocks
+    with price >= 12 BDT, positive intraday momentum (change_pct > 0), and active volume,
+    then hands them to full 90-day historical OHLCV XGBoost + 20-indicator verification.
     """
     if live_df is None or len(live_df) == 0:
         return []
@@ -461,72 +511,46 @@ def score_snapshot_batch(live_df: pd.DataFrame) -> list[dict[str, Any]]:
     df.columns = [str(c).lower().strip() for c in df.columns]
     sym_col = "symbol" if "symbol" in df.columns else df.columns[1]
 
-    records: list[dict[str, Any]] = []
-    feature_rows: list[dict[str, float]] = []
+    active_candidates: list[dict[str, Any]] = []
 
     for _, r in df.iterrows():
         sym = str(r.get(sym_col, "")).strip().upper()
-        if not sym or len(sym) > 12 or sym.startswith("TB") or sym.endswith("BOND"):
+        if not sym or len(sym) > 15 or sym.startswith("TB") or sym.endswith("BOND"):
             continue
         try:
-            c = float(str(r.get("ltp", r.get("close", 0))).replace(",", "") or 0)
-            if c < 12.0 or not math.isfinite(c):
+            ltp = float(str(r.get("ltp", r.get("close", 0))).replace(",", "") or 0)
+            if ltp < MIN_STRONG_BUY_PRICE or not math.isfinite(ltp):
                 continue
-            h = float(str(r.get("high", c)).replace(",", "") or c)
-            l = float(str(r.get("low", c)).replace(",", "") or c)
-            ycp = float(str(r.get("ycp", c)).replace(",", "") or c)
-            o = float(str(r.get("open", ycp)).replace(",", "") or ycp)
+            ycp = float(str(r.get("ycp", ltp)).replace(",", "") or ltp)
+            high_p = float(str(r.get("high", ltp)).replace(",", "") or ltp)
+            low_p = float(str(r.get("low", ltp)).replace(",", "") or ltp)
+            vol = float(str(r.get("volume", 0)).replace(",", "") or 0)
+            value_mn = float(str(r.get("value", 0)).replace(",", "") or 0)
         except ValueError:
             continue
 
-        ycp = ycp if ycp > 0 else o
-        ret_1d = (c - ycp) / max(ycp, 1e-9)
-        intraday_range = ((max(h, c, o) - min(l, c, o)) / max(ycp, 1e-9)) * 100.0
-        if ret_1d * 100.0 < 0.25 or intraday_range < 1.0:
+        if ycp <= 0 or vol <= 0:
             continue
 
-        sma = (c + o + ycp) / 3.0
-        ema = (c * 0.25) + (sma * 0.75)
-        bb_high = max(h, sma * 1.04)
-        bb_low = min(l, sma * 0.96)
-        est_rsi = min(80.0, max(25.0, 50.0 + (ret_1d * 300.0)))
+        change_pct = ((ltp - ycp) / ycp) * 100.0
+        intraday_range = ((max(high_p, ltp) - min(low_p, ltp)) / ycp) * 100.0
+        if change_pct <= 0.0:
+            continue
 
-        records.append({
+        # Pure real-time liquidity + momentum priority score for 90D verification queue
+        liquidity_momentum_score = (
+            change_pct * 4.0
+            + intraday_range * 1.2
+            + math.log10(max(vol, 10.0)) * 3.0
+            + math.log10(max(value_mn + 1.0, 1.0)) * 2.5
+        )
+        active_candidates.append({
             "symbol": sym,
-            "price": round(c, 2),
-            "change_pct": round(ret_1d * 100.0, 2),
-            "intraday_range": round(intraday_range, 2),
-        })
-        feature_rows.append({
-            "sma_20": sma,
-            "ema_20": ema,
-            "rsi_14": est_rsi,
-            "macd": c - ema,
-            "macd_signal": (c - ema) * 0.8,
-            "macd_diff": (c - ema) * 0.2,
-            "bb_high": bb_high,
-            "bb_mid": sma,
-            "bb_low": bb_low,
-            "return_1d": ret_1d,
-            "return_3d": ret_1d,
-            "return_5d": ret_1d,
-            "vol_ratio": 1.0,
-            "close_sma_ratio": c / max(sma, 1e-9),
-            "close_ema_ratio": c / max(ema, 1e-9),
-            "sma_ema_diff": (ema - sma) / max(sma, 1e-9),
-            "bb_pos": (c - bb_low) / max(bb_high - bb_low, 1e-9),
+            "price": round(ltp, 2),
+            "change_pct": round(change_pct, 2),
+            "volume": int(vol),
+            "liquidity_score": round(liquidity_momentum_score, 2),
         })
 
-    if not feature_rows:
-        return []
-
-    preds, probs = predict_from_feature_frame(pd.DataFrame(feature_rows))
-    shortlist: list[dict[str, Any]] = []
-    for rec, pred_cls, prob in zip(records, preds, probs):
-        if int(pred_cls) == 2:
-            buy_prob = float(prob[2]) * 100.0 if len(prob) > 2 else float(np.max(prob)) * 100.0
-            rec["buy_score"] = round(buy_prob + rec["change_pct"] * 2.5 + rec["intraday_range"] * 1.5, 2)
-            shortlist.append(rec)
-
-    shortlist.sort(key=lambda x: x["buy_score"], reverse=True)
-    return shortlist
+    active_candidates.sort(key=lambda x: x["liquidity_score"], reverse=True)
+    return active_candidates

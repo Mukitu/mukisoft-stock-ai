@@ -33,6 +33,11 @@ import {
   unsubscribeBdapps,
 } from '../services/bdappsService';
 import { useTopPicks } from '../hooks/useMarketQueries';
+import { LIVE_FEED_WAITING_BN } from '../services/apiClient';
+import {
+  STRONG_BUY_BADGE_BN,
+  formatStrongBuyConsensusLine,
+} from '../utils/quantConsensus';
 
 interface DashboardLocationState {
   freshHandoff?: boolean;
@@ -385,7 +390,12 @@ export function DashboardPage() {
                   >
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-sm font-bold text-slate-900">{pick.symbol}</span>
-                      <span className="text-[11px] font-bold text-emerald-700">Strong Buy</span>
+                      <span className="text-[10px] font-bold text-emerald-700 truncate">
+                        {STRONG_BUY_BADGE_BN}
+                      </span>
+                    </div>
+                    <div className="text-[11px] font-semibold text-emerald-800 leading-snug">
+                      {formatStrongBuyConsensusLine(pick.bull_votes)}
                     </div>
                     <div className="flex items-center justify-between text-xs font-mono-num text-slate-600">
                       <span>৳{pick.price.toFixed(2)}</span>
@@ -397,8 +407,8 @@ export function DashboardPage() {
                 ))}
               </div>
             ) : (
-              <p className="text-xs text-slate-500">
-                দৈনিক রাডার লোড হচ্ছে। যেকোনো শেয়ার যাচাই করতে সরাসরি AI অ্যানালাইজার ব্যবহার করুন।
+              <p className="text-xs text-slate-600 leading-relaxed">
+                {LIVE_FEED_WAITING_BN}
               </p>
             )}
           </section>

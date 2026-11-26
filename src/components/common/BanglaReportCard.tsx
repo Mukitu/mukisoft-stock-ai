@@ -19,6 +19,17 @@ export function BanglaReportCard({
         <div>
           <div className="text-xs font-semibold text-blue-700">MukiSoft AI ২০-ইন্ডিকেটর কনসেনসাস রিপোর্ট</div>
           <h2 className="text-lg font-bold text-slate-900 mt-0.5">{report.decisionTitle}</h2>
+          <p
+            className={`text-xs font-semibold mt-1 ${
+              analysis.action_type === 'BUY'
+                ? 'text-emerald-700'
+                : analysis.action_type === 'SELL'
+                  ? 'text-rose-700'
+                  : 'text-amber-700'
+            }`}
+          >
+            {report.consensusVerdictLine}
+          </p>
         </div>
         <div className="text-xs text-slate-500 font-mono-num">
           {analysis.bull_votes}/{analysis.total_votes} বুলিশ · {analysis.bear_votes}/{analysis.total_votes} সতর্ক

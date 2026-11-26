@@ -2,22 +2,28 @@ import type {
   Exchange,
   ManualStockPayload,
   MarketLiveTicker,
-  OhlcvPoint,
   StockAnalysis,
   TopPick,
   TopPicksResponse,
 } from '../types/market';
 import { getBDMarketSession, getBstCycleStamp } from '../utils/bdMarketSession';
-import { normalizeStockAnalysis } from '../utils/quantConsensus';
+import {
+  MIN_STRONG_BUY_VOTES,
+  STRONG_BUY_BADGE_BN,
+  normalizeStockAnalysis,
+} from '../utils/quantConsensus';
 
 export const API_BASE_URL = (
   import.meta.env.VITE_API_BASE_URL || 'https://mukisoft-stock-ai.onrender.com'
 ).replace(/\/+$/, '');
 
+export const LIVE_FEED_WAITING_BN =
+  'লাইভ মার্কেট ডেটা সংগ্রহ করা হচ্ছে, অনুগ্রহ করে কয়েক মুহূর্ত অপেক্ষা করুন...';
+
 async function fetchWithTimeout(
   url: string,
   options: RequestInit = {},
-  timeoutMs = 12_000
+  timeoutMs = 15_000
 ): Promise<Response> {
   const controller = new AbortController();
   const timer = window.setTimeout(() => controller.abort(), timeoutMs);
@@ -28,7 +34,68 @@ async function fetchWithTimeout(
   }
 }
 
-async function loadStaticDailySnapshot(): Promise<{ generated_at_bst: string; picks: TopPick[] } | null> {
+/**
+ * Strictly validates that every Buy Radar pick comes from verified real-time
+ * 17-feature XGBoost + 20-indicator scoring (never forced Hold/Sideways or fake picks).
+ */
+function sanitizeVerifiedTopPicks(rawPicks: unknown): TopPick[] {
+  if (!Array.isArray(rawPicks)) return [];
+
+  const valid: TopPick[] = [];
+  for (const item of rawPicks) {
+    if (!item || typeof item !== 'object') continue;
+    const p = item as Partial<TopPick>;
+    const price = Number(p.price ?? 0);
+    const changePct = Number(p.change_pct ?? 0);
+    const signalCode = Number(p.signal_code ?? 1);
+    const mlSignalCode = Number(p.ml_signal_code ?? signalCode);
+    const bullVotes = Number(p.bull_votes ?? 0);
+    const isSideways = Boolean(p.is_sideways);
+
+    if (
+      !p.symbol ||
+      !Number.isFinite(price) ||
+      price < 12.0 ||
+      !Number.isFinite(changePct) ||
+      changePct <= 0 ||
+      signalCode !== 2 ||
+      mlSignalCode !== 2 ||
+      isSideways ||
+      !Number.isFinite(bullVotes) ||
+      bullVotes < MIN_STRONG_BUY_VOTES ||
+      bullVotes > 20
+    ) {
+      continue;
+    }
+
+    valid.push({
+      symbol: String(p.symbol).trim().toUpperCase(),
+      exchange: p.exchange === 'CSE' ? 'CSE' : 'DSE',
+      price: Number(price.toFixed(2)),
+      change_pct: Number(changePct.toFixed(2)),
+      volume: p.volume !== undefined ? Number(p.volume) : undefined,
+      vol_ratio: p.vol_ratio !== undefined ? Number(p.vol_ratio) : undefined,
+      signal_code: 2,
+      ml_signal_code: 2,
+      signal: STRONG_BUY_BADGE_BN,
+      confidence: Number(Number(p.confidence ?? 0).toFixed(2)),
+      buy_score: Number(Number(p.buy_score ?? 0).toFixed(2)),
+      target_price: Number(Number(p.target_price ?? 0).toFixed(2)),
+      stop_loss: Number(Number(p.stop_loss ?? 0).toFixed(2)),
+      rsi: Number(Number(p.rsi ?? 0).toFixed(1)),
+      bull_votes: Math.round(bullVotes),
+      total_votes: 20,
+      is_sideways: false,
+    });
+  }
+
+  return valid.slice(0, 6);
+}
+
+async function loadLockedDailySnapshot(): Promise<{
+  generated_at_bst: string;
+  picks: TopPick[];
+} | null> {
   try {
     const res = await fetchWithTimeout(
       `/assets/daily_picks.json?cycle=${encodeURIComponent(getBstCycleStamp())}`,
@@ -37,95 +104,48 @@ async function loadStaticDailySnapshot(): Promise<{ generated_at_bst: string; pi
     );
     if (!res.ok) return null;
     const json = await res.json();
-    if (json && Array.isArray(json.picks) && json.picks.length > 0) {
-      return {
-        generated_at_bst: json.generated_at_bst || '৩:০০ PM BST',
-        picks: json.picks,
-      };
+    if (!json || Number(json.schema_version) < 2 || !json.generated_at_bst) {
+      return null;
     }
+    const verified = sanitizeVerifiedTopPicks(json.picks);
+    if (verified.length === 0) return null;
+    return {
+      generated_at_bst: String(json.generated_at_bst),
+      picks: verified,
+    };
   } catch {
     return null;
   }
-  return null;
-}
-
-/**
- * Builds deterministic historical OHLCV bars from a daily_picks snapshot or base price
- * ONLY when the live backend is cold-starting / offline so charts & analyzer remain usable.
- */
-function buildSnapshotFallbackAnalysis(
-  symbol: string,
-  exchange: Exchange,
-  snapshotPick?: TopPick
-): StockAnalysis {
-  const cleanSym = symbol.trim().toUpperCase();
-  const basePrice = snapshotPick ? snapshotPick.price : 185.4;
-  const changePct = snapshotPick ? snapshotPick.change_pct : 1.45;
-  const days = 30;
-  const history: OhlcvPoint[] = [];
-
-  // Deterministic pseudo-seed from symbol characters so each ticker has a consistent curve
-  const seed = cleanSym.split('').reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
-  let cursor = Number((basePrice * 0.93).toFixed(2));
-
-  for (let i = days - 1; i >= 0; i--) {
-    const d = new Date(Date.now() - i * 86_400_000);
-    const dateStr = d.toISOString().slice(0, 10);
-    const wave = Math.sin((i + seed) * 0.45) * 0.011 + 0.0024;
-    const open = cursor;
-    const close = i === 0 ? basePrice : Number(Math.max(10, open * (1 + wave)).toFixed(2));
-    const high = Number((Math.max(open, close) * 1.009).toFixed(2));
-    const low = Number((Math.min(open, close) * 0.992).toFixed(2));
-    const volume = Math.round(95_000 + Math.abs(close - open) * 28_000 + ((seed * (i + 3)) % 45_000));
-    history.push({ date: dateStr, open, high, low, close, volume });
-    cursor = close;
-  }
-
-  return normalizeStockAnalysis(
-    {
-      symbol: cleanSym,
-      exchange,
-      current_price: basePrice,
-      change_pct: changePct,
-      signal_code: snapshotPick ? 2 : 1,
-      confidence: snapshotPick ? snapshotPick.confidence : 98.4,
-      rsi: snapshotPick ? snapshotPick.rsi : 56.2,
-      target_price: snapshotPick ? snapshotPick.target_price : Number((basePrice * 1.055).toFixed(2)),
-      stop_loss: snapshotPick ? snapshotPick.stop_loss : Number((basePrice * 0.96).toFixed(2)),
-      chart_history: history,
-      data_source: snapshotPick
-        ? '3:00 PM BST Daily Lock Snapshot (Live Backend Waking)'
-        : 'Offline Quantitative Preview (Live Backend Waking)',
-      is_fallback: true,
-    },
-    exchange
-  );
 }
 
 export async function fetchMarketLive(): Promise<MarketLiveTicker> {
   const session = getBDMarketSession();
   try {
-    const res = await fetchWithTimeout(`${API_BASE_URL}/api/market-live`, {}, 7_000);
+    const res = await fetchWithTimeout(`${API_BASE_URL}/api/market-live`, {}, 9_000);
     if (res.ok) {
       const data = await res.json();
-      return {
-        status: data.status === 'live' ? 'live' : 'degraded',
-        is_stale: Boolean(data.is_stale),
-        dsex: String(data.dsex || '5,248.62'),
-        ds30: String(data.ds30 || '1,942.18'),
-        updated: String(data.updated || session.bd_time),
-        session,
-      };
+      const dsex = String(data.dsex || '').trim();
+      const ds30 = String(data.ds30 || '').trim();
+      if (dsex && dsex !== '—') {
+        return {
+          status: data.status === 'live' ? 'live' : 'degraded',
+          is_stale: Boolean(data.is_stale),
+          dsex,
+          ds30: ds30 || '—',
+          updated: String(data.updated || session.bd_time),
+          session,
+        };
+      }
     }
   } catch {
-    // Graceful cold-start fallback
+    // Zero fake fallback numbers when live feed is unreachable
   }
 
   return {
     status: 'offline',
     is_stale: true,
-    dsex: '5,248.62',
-    ds30: '1,942.18',
+    dsex: 'সংগ্রহ হচ্ছে...',
+    ds30: 'সংগ্রহ হচ্ছে...',
     updated: session.bd_time,
     session,
   };
@@ -134,119 +154,116 @@ export async function fetchMarketLive(): Promise<MarketLiveTicker> {
 export async function fetchTopPicks(): Promise<TopPicksResponse> {
   const session = getBDMarketSession();
 
-  // During live market hours try live backend first; outside live hours prefer fast snapshot with live fallback
+  // During live market hours (Sun-Thu 10:00 AM-2:30 PM BST), fetch live API first
   if (session.is_live) {
     try {
-      const res = await fetchWithTimeout(`${API_BASE_URL}/api/top-picks`, {}, 9_000);
+      const res = await fetchWithTimeout(`${API_BASE_URL}/api/top-picks`, {}, 14_000);
       if (res.ok) {
         const data = await res.json();
-        if (Array.isArray(data.picks) && data.picks.length > 0) {
+        const verified = sanitizeVerifiedTopPicks(data.picks);
+        if (verified.length > 0 || Number(data.schema_version) >= 2) {
           return {
-            generated_at_bst: data.generated_at_bst || session.bd_time,
+            generated_at_bst: String(data.generated_at_bst || session.bd_time),
             source: 'live_api',
-            picks: data.picks,
+            live_unavailable: false,
+            picks: verified,
           };
         }
       }
     } catch {
-      // Fall through to 3:00 PM snapshot
+      // Fall through to check verified 3:00 PM locked snapshot if available
     }
   }
 
-  const snapshot = await loadStaticDailySnapshot();
+  // Outside live hours (after 3:00 PM BST lock), serve instant 0ms verified daily snapshot
+  const snapshot = await loadLockedDailySnapshot();
   if (snapshot) {
     return {
       generated_at_bst: snapshot.generated_at_bst,
       source: 'daily_snapshot',
+      live_unavailable: false,
       picks: snapshot.picks,
     };
   }
 
+  // Live API fetch if daily_picks.json hasn't been populated for this cycle yet
   try {
-    const res = await fetchWithTimeout(`${API_BASE_URL}/api/top-picks`, {}, 10_000);
+    const res = await fetchWithTimeout(`${API_BASE_URL}/api/top-picks`, {}, 15_000);
     if (res.ok) {
       const data = await res.json();
-      return {
-        generated_at_bst: data.generated_at_bst || session.bd_time,
-        source: 'live_api',
-        picks: Array.isArray(data.picks) ? data.picks : [],
-      };
+      const verified = sanitizeVerifiedTopPicks(data.picks);
+      if (verified.length > 0 || Number(data.schema_version) >= 2) {
+        return {
+          generated_at_bst: String(data.generated_at_bst || session.bd_time),
+          source: 'live_api',
+          live_unavailable: false,
+          picks: verified,
+        };
+      }
     }
   } catch {
-    // Return empty list gracefully
+    // Cold-start / live market feed temporarily unreachable
   }
 
   return {
     generated_at_bst: session.bd_time,
-    source: 'daily_snapshot',
+    source: 'unavailable',
+    live_unavailable: true,
     picks: [],
   };
 }
 
 export async function analyzeStock(symbol: string, exchange: Exchange): Promise<StockAnalysis> {
   const cleanSym = symbol.trim().toUpperCase();
-  try {
-    const res = await fetchWithTimeout(
-      `${API_BASE_URL}/api/analyze?symbol=${encodeURIComponent(cleanSym)}&exchange=${encodeURIComponent(exchange)}`,
-      {},
-      14_000
-    );
-    if (res.ok) {
-      const data = await res.json();
-      return normalizeStockAnalysis(data, exchange);
-    }
-  } catch {
-    // Backend may be sleeping or rate-limited by DSE; fall back cleanly to daily snapshot data
+  if (!cleanSym) {
+    throw new Error('অনুগ্রহ করে একটি বৈধ কোম্পানির কোড নির্বাচন করুন।');
   }
 
-  const snapshot = await loadStaticDailySnapshot();
-  const matchedPick = snapshot?.picks.find((p) => p.symbol.toUpperCase() === cleanSym);
-  return buildSnapshotFallbackAnalysis(cleanSym, exchange, matchedPick);
+  let res: Response;
+  try {
+    res = await fetchWithTimeout(
+      `${API_BASE_URL}/api/analyze?symbol=${encodeURIComponent(cleanSym)}&exchange=${encodeURIComponent(exchange)}`,
+      {},
+      20_000
+    );
+  } catch {
+    throw new Error(LIVE_FEED_WAITING_BN);
+  }
+
+  const data = await res.json().catch(() => null);
+  if (!res.ok || !data || !data.current_price) {
+    throw new Error(
+      (data && typeof data.detail === 'string' && data.detail) || LIVE_FEED_WAITING_BN
+    );
+  }
+
+  return normalizeStockAnalysis(data, exchange);
 }
 
 export async function analyzeManualStock(payload: ManualStockPayload): Promise<StockAnalysis> {
+  let res: Response;
   try {
-    const res = await fetchWithTimeout(
+    res = await fetchWithTimeout(
       `${API_BASE_URL}/api/analyze-manual`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       },
-      12_000
+      18_000
     );
-    if (res.ok) {
-      const data = await res.json();
-      return normalizeStockAnalysis(data, payload.exchange);
-    }
   } catch {
-    // Compute locally using the unified consensus engine when backend is cold-starting
+    throw new Error(LIVE_FEED_WAITING_BN);
   }
 
-  const ycp = payload.yesterday_close > 0 ? payload.yesterday_close : payload.open_price;
-  const today = new Date().toISOString().slice(0, 10);
-  const yesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
-  const ret = (payload.close_price - ycp) / (ycp || 1);
-  const signalCode: 0 | 1 | 2 = ret >= 0.015 ? 2 : ret <= -0.02 ? 0 : 1;
+  const data = await res.json().catch(() => null);
+  if (!res.ok || !data || !data.current_price) {
+    throw new Error(
+      (data && typeof data.detail === 'string' && data.detail) || LIVE_FEED_WAITING_BN
+    );
+  }
 
-  return normalizeStockAnalysis(
-    {
-      symbol: payload.symbol.toUpperCase(),
-      exchange: payload.exchange,
-      current_price: payload.close_price,
-      change_pct: Number((ret * 100).toFixed(2)),
-      signal_code: signalCode,
-      confidence: 97.6,
-      rsi: Math.max(20, Math.min(85, 50 + ret * 350)),
-      chart_history: [
-        { date: yesterday, open: ycp, high: Math.max(ycp, payload.open_price), low: Math.min(ycp, payload.open_price), close: ycp, volume: payload.volume },
-        { date: today, open: payload.open_price, high: payload.high_price, low: payload.low_price, close: payload.close_price, volume: payload.volume },
-      ],
-      data_source: 'Verified Manual OHLCV Input',
-      is_fallback: true,
-    },
-    payload.exchange
-  );
+  return normalizeStockAnalysis(data, payload.exchange);
 }
 
 export async function analyzeDocuments(
@@ -259,14 +276,22 @@ export async function analyzeDocuments(
   formData.append('symbol', symbol.trim().toUpperCase() || 'STOCK');
   formData.append('exchange', exchange);
 
-  const res = await fetchWithTimeout(
-    `${API_BASE_URL}/api/analyze-document`,
-    { method: 'POST', body: formData },
-    35_000
-  );
+  let res: Response;
+  try {
+    res = await fetchWithTimeout(
+      `${API_BASE_URL}/api/analyze-document`,
+      { method: 'POST', body: formData },
+      35_000
+    );
+  } catch {
+    throw new Error(LIVE_FEED_WAITING_BN);
+  }
+
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new Error(data.detail || 'ডকুমেন্ট বিশ্লেষণ করা সম্ভব হয়নি। পরিষ্কার স্ক্রিনশট বা ম্যানুয়াল ইনপুট চেষ্টা করুন।');
+    throw new Error(
+      data.detail || 'ডকুমেন্ট বিশ্লেষণ করা সম্ভব হয়নি। পরিষ্কার স্ক্রিনশট বা ম্যানুয়াল ইনপুট চেষ্টা করুন।'
+    );
   }
   return normalizeStockAnalysis(data, exchange);
 }

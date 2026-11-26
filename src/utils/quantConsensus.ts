@@ -8,9 +8,23 @@ import type {
   TechnicalIndicators,
 } from '../types/market';
 
+export const STRONG_BUY_BADGE_BN = 'এখনই বাই করতে পারেন (Strong Buy)';
+export const MIN_STRONG_BUY_VOTES = 15;
+
+const BANGLA_DIGITS = ['০', '১', '২', '৩', '৪', '৫', '৬', '৭', '৮', '৯'];
+
+export function toBanglaDigits(value: number | string): string {
+  return String(value).replace(/\d/g, (d) => BANGLA_DIGITS[Number(d)] ?? d);
+}
+
+export function formatStrongBuyConsensusLine(bullVotes: number): string {
+  return `২০টি সূচকের মধ্যে ${toBanglaDigits(bullVotes)}টি ইতিবাচক সিদ্ধান্ত • এখনই বাই করার উপযুক্ত`;
+}
+
 export interface StructuredBanglaReport {
   decisionTitle: string;
   decisionSummary: string;
+  consensusVerdictLine: string;
   trendNote: string;
   momentumNote: string;
   supportResistanceNote: string;
@@ -126,7 +140,7 @@ export function computeProChartIndicators(ohlcv: OhlcvPoint[]): ChartIndicatorSe
  * Fixes the roc5 temporal dead zone bug and guarantees metric cards & report numbers always match.
  */
 export function normalizeStockAnalysis(raw: Partial<StockAnalysis>, fallbackExchange: Exchange = 'DSE'): StockAnalysis {
-  const symbol = (raw.symbol || 'SQURPHARMA').toUpperCase();
+  const symbol = (raw.symbol || '').trim().toUpperCase();
   const exchange: Exchange = raw.exchange === 'CSE' ? 'CSE' : fallbackExchange;
   const price = Number(raw.current_price || 0);
 
@@ -153,31 +167,58 @@ export function normalizeStockAnalysis(raw: Partial<StockAnalysis>, fallbackExch
     raw.support_resistance &&
     raw.action_type
   ) {
+    const bullVotes = raw.bull_votes ?? raw.votes.filter((v) => v.bullish).length;
+    const isGenuineBuy =
+      !raw.is_sideways &&
+      (raw.ml_signal_code ?? raw.signal_code ?? 1) === 2 &&
+      bullVotes >= MIN_STRONG_BUY_VOTES;
+
+    const actionType: ActionType = raw.is_sideways
+      ? 'SIDEWAYS'
+      : isGenuineBuy
+        ? 'BUY'
+        : raw.action_type === 'BUY'
+          ? 'HOLD'
+          : raw.action_type;
+
+    const signalCode: 0 | 1 | 2 =
+      actionType === 'BUY' ? 2 : actionType === 'SELL' ? 0 : 1;
+
+    const signalLabel =
+      actionType === 'BUY'
+        ? STRONG_BUY_BADGE_BN
+        : actionType === 'SELL'
+          ? 'বিক্রি বা সতর্ক থাকুন (Sell)'
+          : actionType === 'SIDEWAYS'
+            ? 'সাইডওয়ে মার্কেট — এড়িয়ে চলুন (Sideways)'
+            : 'হোল্ড / পর্যবেক্ষণ করুন (Hold)';
+
     return {
       symbol,
       exchange,
       current_price: Number(price.toFixed(2)),
       change_pct: Number((raw.change_pct ?? 0).toFixed(2)),
-      signal: raw.signal || 'হোল্ড / পর্যবেক্ষণ করুন (Hold)',
-      signal_code: (raw.signal_code ?? 1) as 0 | 1 | 2,
-      action_type: raw.action_type,
-      ml_signal: raw.ml_signal || raw.signal || 'Hold / Wait',
+      signal: signalLabel,
+      signal_code: signalCode,
+      action_type: actionType,
+      ml_signal: raw.ml_signal || (signalCode === 2 ? 'Strong Buy' : signalCode === 0 ? 'High Risk / Sell' : 'Hold / Wait'),
       ml_signal_code: (raw.ml_signal_code ?? raw.signal_code ?? 1) as 0 | 1 | 2,
-      confidence: Number((raw.confidence ?? 98.0).toFixed(2)),
+      confidence: Number((raw.confidence ?? 0).toFixed(2)),
       rsi: Number((raw.rsi ?? raw.indicators.rsi14).toFixed(2)),
       target_price: Number((raw.target_price ?? raw.support_resistance.r1).toFixed(2)),
       stop_loss: Number((raw.stop_loss ?? raw.support_resistance.s1).toFixed(2)),
       support_resistance: raw.support_resistance,
-      bull_votes: raw.bull_votes ?? 0,
-      bear_votes: raw.bear_votes ?? 0,
+      bull_votes: bullVotes,
+      bear_votes: raw.bear_votes ?? 20 - bullVotes,
       total_votes: raw.total_votes ?? 20,
       votes: raw.votes,
       is_sideways: Boolean(raw.is_sideways),
       indicators: raw.indicators,
       ai_analysis_bn: raw.ai_analysis_bn || '',
       chart_history: history,
-      data_source: raw.data_source || 'MukiSoft Quantitative Engine',
-      is_fallback: raw.is_fallback,
+      data_source: raw.data_source || 'MukiSoft Live Quantitative Engine',
+      volume: raw.volume,
+      vol_ratio: raw.vol_ratio,
     };
   }
 
@@ -274,10 +315,10 @@ export function normalizeStockAnalysis(raw: Partial<StockAnalysis>, fallbackExch
     actionType = 'SIDEWAYS';
     signalCode = 1;
     badgeText = 'সাইডওয়ে মার্কেট — এড়িয়ে চলুন (Sideways)';
-  } else if (mlSignalCode === 2 && bullVotes >= 16) {
+  } else if (mlSignalCode === 2 && bullVotes >= MIN_STRONG_BUY_VOTES) {
     actionType = 'BUY';
     signalCode = 2;
-    badgeText = 'এখন কিনতে পারেন (Strong Buy)';
+    badgeText = STRONG_BUY_BADGE_BN;
   } else if (mlSignalCode === 0 || bearVotes >= 12) {
     actionType = 'SELL';
     signalCode = 0;
@@ -340,8 +381,9 @@ export function normalizeStockAnalysis(raw: Partial<StockAnalysis>, fallbackExch
     indicators,
     ai_analysis_bn: raw.ai_analysis_bn || '',
     chart_history: history,
-    data_source: raw.data_source || 'MukiSoft Quantitative Engine',
-    is_fallback: raw.is_fallback,
+    data_source: raw.data_source || 'MukiSoft Live Quantitative Engine',
+    volume: raw.volume,
+    vol_ratio: raw.vol_ratio,
   };
 }
 
@@ -361,20 +403,24 @@ export function buildStructuredBanglaReport(analysis: StockAnalysis): Structured
   const recentLow = last5.length ? Math.min(...last5.map((d) => d.low), price) : price;
   const prevOpen = last5.length >= 2 ? last5[last5.length - 2].close : price;
 
-  let decisionTitle = 'চূড়ান্ত AI সিদ্ধান্ত: এখনই তাড়াহুড়ো নয়, পর্যবেক্ষণ করুন';
-  let decisionSummary = `${symbol} (${exchange}) শেয়ারটির ২০টি সূচকের মধ্যে ${bullCount}টি ইতিবাচক এবং ${bearCount}টি সতর্কতামূলক অবস্থানে রয়েছে। বাজার এখন পরবর্তী দিক নির্ধারণের অপেক্ষায় আছে।`;
+  let decisionTitle = 'চূড়ান্ত AI সিদ্ধান্ত: এখনই তাড়াহুড়ো নয়, পর্যবেক্ষণ করুন (Hold)';
+  let consensusVerdictLine = `২০টি সূচকের মধ্যে ${toBanglaDigits(bullCount)}টি ইতিবাচক ও ${toBanglaDigits(bearCount)}টি সতর্কতামূলক সিদ্ধান্ত`;
+  let decisionSummary = `${symbol} (${exchange}) শেয়ারটির ২০টি সূচকের মধ্যে ${toBanglaDigits(bullCount)}টি ইতিবাচক এবং ${toBanglaDigits(bearCount)}টি সতর্কতামূলক অবস্থানে রয়েছে। বাজার এখন পরবর্তী দিক নির্ধারণের অপেক্ষায় আছে।`;
   let actionNote = `নতুন করে কেনার আগে শেয়ারটি নিচের সাপোর্ট ৳${s1.toFixed(2)} থেকে ঘুরে দাঁড়ায় কি না অথবা উপরের ৳${r1.toFixed(2)} সীমা অতিক্রম করে কি না তা দেখুন।`;
 
   if (analysis.action_type === 'BUY') {
-    decisionTitle = 'চূড়ান্ত AI সিদ্ধান্ত: এখন কিনতে পারেন (Strong Buy)';
-    decisionSummary = `আমাদের কোয়ান্টিটেটিভ বিশ্লেষণে ${symbol} (${exchange}) শেয়ারটির ২০টি সূচকের মধ্যে ${bullCount}টিই ইতিবাচক সংকেত দিচ্ছে (মডেল কনফিডেন্স ${confidence.toFixed(1)}%)। মূল প্রাইস ট্রেন্ড এখন স্পষ্টভাবে ঊর্ধ্বমুখী।`;
+    decisionTitle = `চূড়ান্ত AI সিদ্ধান্ত: ${STRONG_BUY_BADGE_BN}`;
+    consensusVerdictLine = formatStrongBuyConsensusLine(bullCount);
+    decisionSummary = `আমাদের কোয়ান্টিটেটিভ বিশ্লেষণে ${symbol} (${exchange}) শেয়ারটির ${consensusVerdictLine} (মডেল কনফিডেন্স ${confidence.toFixed(1)}%)। মূল প্রাইস ট্রেন্ড ও মোমেন্টাম স্পষ্টভাবে ঊর্ধ্বমুখী।`;
     actionNote = `বর্তমান বাজার দর ৳${price.toFixed(2)}-এ ধাপে ধাপে এন্ট্রি বিবেচনা করা যেতে পারে। প্রথম লক্ষ্যমাত্রা ৳${r1.toFixed(2)} (সম্ভাব্য লাভ +${gainPct}%) এবং পরবর্তী লক্ষ্যমাত্রা ৳${r2.toFixed(2)}।`;
   } else if (analysis.action_type === 'SELL') {
     decisionTitle = 'চূড়ান্ত AI সিদ্ধান্ত: বিক্রি বা সতর্ক থাকুন (High Risk / Sell)';
-    decisionSummary = `বিশ্লেষণে দেখা যাচ্ছে ${symbol} (${exchange}) শেয়ারটির ২০টি সূচকের মধ্যে ${bearCount}টিই নেতিবাচক চাপ নির্দেশ করছে। উপরের রেজিস্ট্যান্স বাধায় শেয়ারটি নিচের দিকে নামার ঝুঁকিতে রয়েছে।`;
+    consensusVerdictLine = `২০টি সূচকের মধ্যে ${toBanglaDigits(bearCount)}টি নেতিবাচক চাপ নির্দেশ করছে • সতর্ক থাকুন`;
+    decisionSummary = `বিশ্লেষণে দেখা যাচ্ছে ${symbol} (${exchange}) শেয়ারটির ২০টি সূচকের মধ্যে ${toBanglaDigits(bearCount)}টিই নেতিবাচক চাপ নির্দেশ করছে। উপরের রেজিস্ট্যান্স বাধায় শেয়ারটি নিচের দিকে নামার ঝুঁকিতে রয়েছে।`;
     actionNote = `হাতে শেয়ার থাকলে বর্তমান দর ৳${price.toFixed(2)}-এ মুনাফা সুরক্ষা বিবেচনা করুন। নিচের সাপোর্ট ৳${s1.toFixed(2)} (ঝুঁকি -${riskPct}%) স্থিতিশীল না হওয়া পর্যন্ত নতুন এন্ট্রি এড়িয়ে চলুন।`;
   } else if (analysis.action_type === 'SIDEWAYS') {
     decisionTitle = 'চূড়ান্ত AI সিদ্ধান্ত: সাইডওয়ে মার্কেট (এখন এন্ট্রি নয়)';
+    consensusVerdictLine = `সংকীর্ণ সাইডওয়ে রেঞ্জ (${rangePct.toFixed(1)}%) • ব্রেকআউটের আগে এড়িয়ে চলুন`;
     decisionSummary = `${symbol} (${exchange}) শেয়ারটি বর্তমানে একটি সংকীর্ণ সাইডওয়ে রেঞ্জে আটকে আছে (২০-দিনের ওঠানামা মাত্র ${rangePct.toFixed(1)}%)। এই অবস্থায় মূলধন আটকে থাকার ঝুঁকি বেশি।`;
     actionNote = `শেয়ারটি উপরের রেজিস্ট্যান্স ৳${r1.toFixed(2)} ভলিউমসহ ব্রেকআউট না করা পর্যন্ত অপেক্ষা করাই নিরাপদ।`;
   }
@@ -400,6 +446,7 @@ export function buildStructuredBanglaReport(analysis: StockAnalysis): Structured
   return {
     decisionTitle,
     decisionSummary,
+    consensusVerdictLine,
     trendNote,
     momentumNote,
     supportResistanceNote: `নিরাপদ সাপোর্ট-১: ৳${s1.toFixed(2)} (সাপোর্ট-২: ৳${s2.toFixed(2)}) · রেজিস্ট্যান্স-১: ৳${r1.toFixed(2)} (রেজিস্ট্যান্স-২: ৳${r2.toFixed(2)})।`,

@@ -4,8 +4,10 @@ import {
   ArrowRight,
   BarChart3,
   CheckCircle2,
+  Loader2,
   Lock,
   MessageSquareText,
+  RefreshCw,
   Search,
   ShieldCheck,
   X,
@@ -19,6 +21,11 @@ import {
   getBdappsSession,
   isSessionActive,
 } from '../services/bdappsService';
+import { LIVE_FEED_WAITING_BN } from '../services/apiClient';
+import {
+  STRONG_BUY_BADGE_BN,
+  formatStrongBuyConsensusLine,
+} from '../utils/quantConsensus';
 
 const UNLOCK_PROMPT_BN =
   'বাকি ৫টি Strong Buy স্টক ও পূর্ণ AI সিগন্যাল আনলক করতে আপনার Robi & Cirkle নম্বর দিয়ে সাবস্ক্রাইব করুন';
@@ -35,8 +42,9 @@ export function HomePage() {
 
   const session = getBDMarketSession();
   const isSubscribed = isSessionActive(getBdappsSession());
-  const { data: picksData, isLoading } = useTopPicks();
+  const { data: picksData, isLoading, isFetching, refetch } = useTopPicks();
   const picks: TopPick[] = picksData?.picks || [];
+  const isLiveUnavailable = Boolean(picksData?.live_unavailable);
 
   useEffect(() => {
     const pendingToast = consumeBdappsToast();
@@ -226,33 +234,58 @@ export function HomePage() {
           )}
 
           {isLoading ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 sm:gap-6">
-              {Array.from({ length: 6 }).map((_, idx) => (
-                <div
-                  key={idx}
-                  className="bg-white border border-slate-200 rounded-xl p-5 h-56 animate-pulse space-y-4 w-full min-w-0"
-                >
-                  <div className="h-5 w-28 bg-slate-200 rounded" />
-                  <div className="h-8 w-36 bg-slate-100 rounded" />
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="h-12 bg-slate-100 rounded-lg" />
-                    <div className="h-12 bg-slate-100 rounded-lg" />
-                  </div>
-                </div>
-              ))}
+            <div className="bg-white border border-slate-200 rounded-xl p-10 text-center space-y-3">
+              <Loader2 className="w-8 h-8 text-blue-700 animate-spin mx-auto" />
+              <p className="text-sm font-semibold text-slate-800">{LIVE_FEED_WAITING_BN}</p>
+              <p className="text-xs text-slate-500">
+                DSE ও CSE লাইভ ডেটা থেকে ১৭-ফিচার XGBoost ও ২০-ইন্ডিকেটর (১৫–২০/২০) যাচাই চলছে।
+              </p>
             </div>
           ) : picks.length === 0 ? (
-            <div className="bg-white border border-slate-200 rounded-xl p-8 text-center space-y-3">
-              <p className="text-sm font-semibold text-slate-800">
-                এই মুহূর্তে কোনো প্রকৃত Strong Buy (১৬/২০+ বুলিশ ও নন-সাইডওয়ে) কোম্পানি লক হয়নি।
-              </p>
-              <Link
-                to="/analyzer"
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-700 text-white text-xs font-semibold"
-              >
-                <span>সরাসরি AI অ্যানালাইজার খুলুন</span>
-                <ArrowRight className="w-4 h-4" />
-              </Link>
+            <div className="bg-white border border-slate-200 rounded-xl p-8 text-center space-y-4">
+              {isLiveUnavailable ? (
+                <>
+                  <Loader2 className={`w-7 h-7 text-blue-700 mx-auto ${isFetching ? 'animate-spin' : ''}`} />
+                  <p className="text-sm font-semibold text-slate-800">{LIVE_FEED_WAITING_BN}</p>
+                  <p className="text-xs text-slate-500 max-w-lg mx-auto">
+                    কোনো ডেমো বা অনুমানভিত্তিক স্টক দেখানো হয় না। লাইভ সার্ভার প্রস্তুত হলেই প্রকৃত ১৫–২০/২০ Strong Buy স্টক তালিকা স্বয়ংক্রিয়ভাবে লোড হবে।
+                  </p>
+                  <div className="flex flex-wrap items-center justify-center gap-3 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => void refetch()}
+                      disabled={isFetching}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-blue-700 hover:bg-blue-800 disabled:opacity-60 text-white text-xs font-semibold cursor-pointer"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${isFetching ? 'animate-spin' : ''}`} />
+                      <span>{isFetching ? 'সংগ্রহ হচ্ছে...' : 'আবার চেষ্টা করুন'}</span>
+                    </button>
+                    <Link
+                      to="/analyzer"
+                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 text-xs font-semibold"
+                    >
+                      <span>সরাসরি AI অ্যানালাইজার খুলুন</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </Link>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p className="text-sm font-semibold text-slate-800">
+                    বর্তমান রিয়েল-টাইম স্ক্যানে কোনো কোম্পানি একসাথে ML Strong Buy এবং ১৫/২০+ ইতিবাচক সূচকের কঠোর শর্ত পূরণ করেনি।
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    আমরা কখনোই Hold বা Sideways স্টককে জোরপূর্বক Strong Buy হিসেবে দেখাই না।
+                  </p>
+                  <Link
+                    to="/analyzer"
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-700 text-white text-xs font-semibold"
+                  >
+                    <span>সরাসরি AI অ্যানালাইজার খুলুন</span>
+                    <ArrowRight className="w-4 h-4" />
+                  </Link>
+                </>
+              )}
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 sm:gap-6 w-full min-w-0">
@@ -277,42 +310,42 @@ export function HomePage() {
                       aria-label={`প্রিমিয়াম Strong Buy স্টক #${idx + 1} আনলক করতে সাবস্ক্রাইব করুন`}
                       className="relative overflow-hidden bg-white border border-slate-200 hover:border-blue-600/70 rounded-xl p-5 transition-all flex flex-col justify-between w-full min-w-0 cursor-pointer group focus:outline-none focus:ring-2 focus:ring-blue-700"
                     >
-                      {/* Blurred Underlying Stock Metrics (Non-Interactive) */}
+                      {/* Redacted Blurred Underlying Placeholder (Zero Fake Prices) */}
                       <div aria-hidden="true" className="blur-[7px] select-none pointer-events-none opacity-60">
                         <div className="flex items-start justify-between gap-2 pb-3 border-b border-slate-100">
                           <div>
                             <div className="text-xs text-slate-500">
-                              {isLowTier ? 'Low-Cap Active' : 'Mid & Large-Cap'} · {item.exchange} · RSI 58
+                              {isLowTier ? 'Low-Cap Active' : 'Mid & Large-Cap'} · {item.exchange}
                             </div>
-                            <div className="text-lg font-bold text-slate-900 mt-0.5">PREMIUM{idx + 1}</div>
+                            <div className="text-lg font-bold text-slate-900 mt-0.5">••••••••</div>
                           </div>
                           <div className="text-right">
-                            <div className="text-xs font-bold text-emerald-700">Strong Buy</div>
-                            <div className="text-[11px] text-slate-500 font-mono-num">98.6% conf</div>
+                            <div className="text-xs font-bold text-emerald-700">{STRONG_BUY_BADGE_BN}</div>
+                            <div className="text-[11px] text-slate-500 font-mono-num">••/20</div>
                           </div>
                         </div>
 
                         <div className="flex items-baseline justify-between py-4">
                           <div>
                             <div className="text-[11px] text-slate-500">বর্তমান / ক্লোজিং দর</div>
-                            <div className="text-2xl font-bold text-slate-900 font-mono-num">৳ 142.50</div>
+                            <div className="text-2xl font-bold text-slate-900 font-mono-num">৳ ••••</div>
                           </div>
-                          <div className="text-sm font-bold font-mono-num text-emerald-700">+3.40%</div>
+                          <div className="text-sm font-bold font-mono-num text-emerald-700">+•.••%</div>
                         </div>
 
                         <div className="grid grid-cols-2 gap-3 pb-4 border-b border-slate-100 text-xs">
                           <div>
                             <div className="text-slate-500">টার্গেট প্রাইস</div>
-                            <div className="font-bold text-emerald-700 font-mono-num text-sm mt-0.5">৳ 156.80</div>
+                            <div className="font-bold text-emerald-700 font-mono-num text-sm mt-0.5">৳ ••••</div>
                           </div>
                           <div>
                             <div className="text-slate-500">নিরাপদ স্টপ-লস</div>
-                            <div className="font-bold text-rose-700 font-mono-num text-sm mt-0.5">৳ 135.20</div>
+                            <div className="font-bold text-rose-700 font-mono-num text-sm mt-0.5">৳ ••••</div>
                           </div>
                         </div>
 
                         <div className="flex items-center justify-between pt-3.5 gap-2">
-                          <span className="text-xs text-slate-500">৩:০০ PM BST</span>
+                          <span className="text-xs text-slate-500">{session.cardTiming}</span>
                           <span className="px-3 py-1.5 rounded-lg bg-blue-700 text-white text-xs font-semibold">
                             AI রিপোর্ট
                           </span>
@@ -365,14 +398,21 @@ export function HomePage() {
                           </div>
                         </div>
                         <div className="text-right shrink-0">
-                          <div className="text-xs font-bold text-emerald-700">Strong Buy</div>
-                          <div className="text-[11px] text-slate-500 font-mono-num">
-                            {item.confidence.toFixed(1)}% conf
+                          <span className="inline-block text-[11px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded">
+                            {STRONG_BUY_BADGE_BN}
+                          </span>
+                          <div className="text-[11px] text-slate-500 font-mono-num mt-1">
+                            কনফিডেন্স {item.confidence.toFixed(1)}%
                           </div>
                         </div>
                       </div>
 
-                      <div className="flex items-baseline justify-between py-4 gap-2">
+                      {/* Exact Real-Time Indicator Consensus Line */}
+                      <div className="mt-3 rounded-lg bg-emerald-50/80 border border-emerald-200/80 px-3 py-2 text-[11px] sm:text-xs font-semibold text-emerald-900 leading-snug">
+                        {formatStrongBuyConsensusLine(item.bull_votes)}
+                      </div>
+
+                      <div className="flex items-baseline justify-between py-3.5 gap-2">
                         <div>
                           <div className="text-[11px] text-slate-500">বর্তমান / ক্লোজিং দর</div>
                           <div className="text-2xl font-bold text-slate-900 font-mono-num">
