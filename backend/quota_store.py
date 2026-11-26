@@ -411,22 +411,13 @@ def verify_subscriber_session_record(
                 "updatedAt": record.get("updatedAt"),
             }
 
-        # First sight after cold restart: adopt the provided token so subsequent logins displace it
-        adopted = _upsert_subscriber_session_unlocked(
-            subscriber_key=subscriber_key,
-            session_token=session_token,
-            status="ACTIVE",
-            revoked=False,
-            now_ms=ts_ms,
-            db_path=db_path,
-        )
         return {
-            "valid": True,
-            "active": True,
-            "subscribed": True,
+            "valid": False,
+            "active": False,
+            "subscribed": False,
             "revoked": False,
-            "reason": "OK",
-            "updatedAt": adopted["updatedAt"],
+            "reason": "UNVERIFIED",
+            "updatedAt": None,
         }
 
 

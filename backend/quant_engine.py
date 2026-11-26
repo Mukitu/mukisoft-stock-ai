@@ -386,12 +386,24 @@ def analyze_ohlcv_dataframe(
         date_val = str(row["date"])[:10] if "date" in row and pd.notna(row["date"]) else (
             dt.date.today() - dt.timedelta(days=len(tail) - int(idx))
         ).isoformat()
+        close_val = float(row["close"])
+        open_val = float(row["open"]) if pd.notna(row.get("open")) else close_val
+        high_val = float(row["high"]) if pd.notna(row.get("high")) else close_val
+        low_val = float(row["low"]) if pd.notna(row.get("low")) else close_val
+        if open_val <= 0:
+            open_val = close_val
+        if high_val <= 0:
+            high_val = close_val
+        if low_val <= 0:
+            low_val = close_val
+        high_val = max(high_val, open_val, close_val)
+        low_val = min(low_val, open_val, close_val)
         ohlcv_history.append({
             "date": date_val,
-            "open": round(float(row["open"]), 2),
-            "high": round(float(row["high"]), 2),
-            "low": round(float(row["low"]), 2),
-            "close": round(float(row["close"]), 2),
+            "open": round(open_val, 2),
+            "high": round(high_val, 2),
+            "low": round(low_val, 2),
+            "close": round(close_val, 2),
             "volume": int(max(0.0, float(row.get("volume", 0.0) or 0.0))),
         })
 

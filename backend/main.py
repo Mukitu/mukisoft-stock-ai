@@ -11,10 +11,13 @@ import base64
 import datetime as dt
 import hashlib
 import io
+import ipaddress
 import json
 import logging
 import os
 import re
+import socket
+import ssl
 import tempfile
 import threading
 import time
@@ -89,6 +92,15 @@ HTTP_HEADERS = {
     "Accept-Language": "en-US,en;q=0.9,bn;q=0.8",
     "Referer": "https://www.dsebd.org/",
 }
+BDAPPS_HTTP_HEADERS = {
+    "User-Agent": HTTP_HEADERS["User-Agent"],
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "en-US,en;q=0.9,bn;q=0.8",
+    "Origin": "https://stock.mukisoft.tech",
+    "Referer": "https://stock.mukisoft.tech/",
+    "Connection": "close",
+}
+BDAPPS_CHECK_TIMEOUT = 8.0
 
 SECTOR_CATALOG: dict[str, list[str]] = {
     "Pharmaceuticals & Chemicals": [
@@ -314,6 +326,204 @@ def _get_bdapps_base_candidates() -> list[str]:
     return list(dict.fromkeys(candidates))
 
 
+def _parse_bdapps_json(resp: httpx.Response) -> dict[str, Any] | None:
+    try:
+        parsed = resp.json()
+        if isinstance(parsed, dict):
+            return parsed
+    except Exception:
+        pass
+    text = (resp.text or "").lstrip("\ufeff \t\r\n")
+    if not text:
+        return None
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, dict):
+            return parsed
+    except Exception:
+        return None
+    return None
+
+
+def _resolve_ipv4_addresses_sync(hostname: str, port: int = 443) -> list[str]:
+    ips: list[str] = []
+    try:
+        infos = socket.getaddrinfo(hostname, port, socket.AF_INET, socket.SOCK_STREAM)
+        for info in infos:
+            addr = info[4][0]
+            if addr and addr not in ips:
+                ips.append(addr)
+    except Exception as exc:
+        logger.debug("BDApps IPv4 getaddrinfo failed for %s: %s: %s", hostname, type(exc).__name__, exc)
+    return ips
+
+
+async def _resolve_ipv4_via_doh(hostname: str) -> list[str]:
+    if _http_client is None:
+        return []
+    ips: list[str] = []
+    doh_urls = [
+        f"https://dns.google/resolve?name={quote(hostname)}&type=A",
+        f"https://cloudflare-dns.com/dns-query?name={quote(hostname)}&type=A",
+    ]
+    for doh_url in doh_urls:
+        try:
+            resp = await _http_client.get(
+                doh_url,
+                headers={"Accept": "application/dns-json", "User-Agent": HTTP_HEADERS["User-Agent"]},
+                timeout=3.0,
+            )
+            if resp.status_code != 200:
+                continue
+            data = resp.json()
+            for ans in data.get("Answer", []) if isinstance(data, dict) else []:
+                if isinstance(ans, dict) and ans.get("type") == 1:
+                    raw_ip = str(ans.get("data") or "").strip()
+                    try:
+                        ipaddress.IPv4Address(raw_ip)
+                        if raw_ip not in ips:
+                            ips.append(raw_ip)
+                    except ValueError:
+                        continue
+            if ips:
+                return ips
+        except Exception as exc:
+            logger.debug("BDApps DoH lookup failed on %s for %s: %s: %s", doh_url, hostname, type(exc).__name__, exc)
+    return ips
+
+
+async def _post_bdapps_php(
+    candidates: list[str],
+    path_with_query: str,
+    form_fields: dict[str, str],
+    *,
+    timeout_seconds: float,
+) -> tuple[int, dict[str, Any] | None, Exception | None]:
+    last_exc: Exception | None = None
+    last_status = 502
+    req_timeout = httpx.Timeout(timeout_seconds, connect=min(timeout_seconds, 6.0))
+    ssl_ctx = ssl.create_default_context()
+
+    for base_url in candidates:
+        parsed_base = urlparse(base_url)
+        hostname = parsed_base.hostname or ""
+        port = parsed_base.port or 443
+        base_path = parsed_base.path.rstrip("/")
+        full_rel_path = f"{base_path}/{path_with_query.lstrip('/')}"
+        target_url = f"{base_url.rstrip('/')}/{path_with_query.lstrip('/')}"
+
+        # 1. Primary shared httpx client (HTTP/1.1, follow_redirects=True, browser headers)
+        if _http_client is not None:
+            try:
+                resp = await _http_client.post(
+                    target_url,
+                    data=form_fields,
+                    headers=BDAPPS_HTTP_HEADERS,
+                    timeout=req_timeout,
+                )
+                last_status = resp.status_code
+                body = _parse_bdapps_json(resp)
+                if body is not None and resp.status_code < 500:
+                    return resp.status_code, body, None
+                logger.warning(
+                    "BDApps upstream %s returned HTTP %s (body=%r)",
+                    target_url,
+                    resp.status_code,
+                    (resp.text or "")[:240],
+                )
+            except Exception as exc:
+                last_exc = exc
+                logger.warning(
+                    "BDApps primary client failed for %s: %s: %s (cause=%r)",
+                    target_url,
+                    type(exc).__name__,
+                    exc,
+                    exc.__cause__,
+                )
+
+        # 2. Dedicated IPv4-bound HTTP/1.1 client with fresh TLS context
+        try:
+            ipv4_transport = httpx.AsyncHTTPTransport(
+                local_address="0.0.0.0",
+                verify=ssl_ctx,
+                retries=1,
+            )
+            async with httpx.AsyncClient(
+                follow_redirects=True,
+                http2=False,
+                transport=ipv4_transport,
+            ) as ipv4_client:
+                resp = await ipv4_client.post(
+                    target_url,
+                    data=form_fields,
+                    headers=BDAPPS_HTTP_HEADERS,
+                    timeout=req_timeout,
+                )
+                last_status = resp.status_code
+                body = _parse_bdapps_json(resp)
+                if body is not None and resp.status_code < 500:
+                    return resp.status_code, body, None
+                logger.warning(
+                    "BDApps IPv4 transport %s returned HTTP %s (body=%r)",
+                    target_url,
+                    resp.status_code,
+                    (resp.text or "")[:240],
+                )
+        except Exception as exc:
+            last_exc = exc
+            logger.warning(
+                "BDApps IPv4 transport failed for %s: %s: %s (cause=%r)",
+                target_url,
+                type(exc).__name__,
+                exc,
+                exc.__cause__,
+            )
+
+        # 3. Direct IPv4 + TLS SNI fallback (bypasses container DNS / IPv6 routing issues)
+        if hostname:
+            resolved_ips = await asyncio.to_thread(_resolve_ipv4_addresses_sync, hostname, port)
+            if not resolved_ips:
+                resolved_ips = await _resolve_ipv4_via_doh(hostname)
+            for ip in resolved_ips[:2]:
+                ip_url = f"https://{ip}:{port}{full_rel_path}"
+                try:
+                    async with httpx.AsyncClient(
+                        follow_redirects=True,
+                        http2=False,
+                        verify=ssl_ctx,
+                    ) as sni_client:
+                        resp = await sni_client.post(
+                            ip_url,
+                            data=form_fields,
+                            headers={**BDAPPS_HTTP_HEADERS, "Host": hostname},
+                            extensions={"sni_hostname": hostname},
+                            timeout=req_timeout,
+                        )
+                        last_status = resp.status_code
+                        body = _parse_bdapps_json(resp)
+                        if body is not None and resp.status_code < 500:
+                            return resp.status_code, body, None
+                        logger.warning(
+                            "BDApps SNI IP fallback %s (%s) returned HTTP %s (body=%r)",
+                            ip_url,
+                            hostname,
+                            resp.status_code,
+                            (resp.text or "")[:240],
+                        )
+                except Exception as exc:
+                    last_exc = exc
+                    logger.warning(
+                        "BDApps SNI IP fallback failed for %s (%s): %s: %s (cause=%r)",
+                        ip_url,
+                        hostname,
+                        type(exc).__name__,
+                        exc,
+                        exc.__cause__,
+                    )
+
+    return last_status, None, last_exc
+
+
 async def _check_bdapps_status_detailed(
     subscriber_id: str | None,
     mobile: str | None,
@@ -337,37 +547,36 @@ async def _check_bdapps_status_detailed(
         logger.warning("Blocked unallowlisted BDAPPS_API_BASE host: %s", BDAPPS_API_BASE)
         return None, "UNALLOWLISTED"
 
-    if _http_client is None:
-        return None, "NO_CLIENT"
-
-    for base_url in candidates:
-        try:
-            resp = await _http_client.post(
-                f"{base_url}/check_subscription.php?_t={int(time.time() * 1000)}",
-                data={"user_mobile": normalized_mobile},
-                headers={"Accept": "application/json, text/plain, */*"},
-                timeout=UPSTREAM_HTTP_TIMEOUT,
+    status_code, payload, last_exc = await _post_bdapps_php(
+        candidates,
+        f"check_subscription.php?_t={int(time.time() * 1000)}",
+        {"user_mobile": normalized_mobile},
+        timeout_seconds=max(UPSTREAM_HTTP_TIMEOUT, BDAPPS_CHECK_TIMEOUT),
+    )
+    if status_code == 200 and isinstance(payload, dict):
+        raw_status = str(payload.get("subscriptionStatus", "")).strip().upper()
+        status = re.sub(r"\s+", " ", re.sub(r"[_-]+", " ", raw_status))
+        code = str(payload.get("statusCode", "")).strip().upper()
+        is_active = bool(
+            payload.get("isSubscribed") is True
+            or status in {"REGISTERED", "INITIAL CHARGING PENDING", "PENDING"}
+            or code == "E1351"
+            or (
+                payload.get("success") is True
+                and code == "S1000"
+                and status not in {"UNREGISTERED", "DEREGISTERED", "EXPIRED"}
+                and payload.get("isSubscribed") is not False
             )
-            if resp.status_code == 200:
-                payload = resp.json()
-                raw_status = str(payload.get("subscriptionStatus", "")).strip().upper()
-                status = re.sub(r"\s+", " ", re.sub(r"[_-]+", " ", raw_status))
-                code = str(payload.get("statusCode", "")).strip().upper()
-                is_active = bool(
-                    payload.get("isSubscribed") is True
-                    or status in {"REGISTERED", "INITIAL CHARGING PENDING", "PENDING"}
-                    or code == "E1351"
-                    or (
-                        payload.get("success") is True
-                        and code == "S1000"
-                        and status not in {"UNREGISTERED", "DEREGISTERED", "EXPIRED"}
-                        and payload.get("isSubscribed") is not False
-                    )
-                )
-                cache_set(cache_key, is_active, ttl_seconds=300 if is_active else 30)
-                return is_active, status or ("REGISTERED" if is_active else "UNREGISTERED")
-        except Exception as exc:
-            logger.warning("BDApps subscriber verification error on %s: %s", base_url, exc)
+        )
+        cache_set(cache_key, is_active, ttl_seconds=300 if is_active else 30)
+        return is_active, status or ("REGISTERED" if is_active else "UNREGISTERED")
+
+    if last_exc is not None:
+        logger.warning(
+            "BDApps subscriber verification failed across all candidates: %s: %s",
+            type(last_exc).__name__,
+            last_exc,
+        )
     return None, "NETWORK_ERROR"
 
 
@@ -1780,7 +1989,11 @@ async def compute_daily_top_picks(force_refresh: bool = False) -> dict[str, Any]
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     global _http_client
-    _http_client = httpx.AsyncClient(follow_redirects=True)
+    _http_client = httpx.AsyncClient(
+        follow_redirects=True,
+        http2=False,
+        headers={"User-Agent": HTTP_HEADERS["User-Agent"]},
+    )
     _load_warm_symbol_lookup_from_disk()
     _seed_cache_from_edge_ml_snapshot()
 
@@ -1900,7 +2113,7 @@ def _extract_bdshare_indices_sync() -> tuple[str, str, str] | None:
                 parsed = _parse_float(val)
                 if _is_valid_dsex_value(parsed):
                     dsex_num = parsed
-            elif "ds30" in low:
+            elif "ds30" in low or "dse30" in low:
                 parsed = _parse_float(val)
                 if _is_valid_ds30_value(parsed):
                     ds30_num = parsed
@@ -1911,6 +2124,43 @@ def _extract_bdshare_indices_sync() -> tuple[str, str, str] | None:
     except Exception as exc:
         logger.debug("bdshare get_market_info extraction failed: %s", exc)
     return None
+
+
+def _load_market_snapshot_indices() -> tuple[str, str, str] | None:
+    snapshot_file = BASE_DIR.parent / "public" / "assets" / "market_snapshot.json"
+    if not snapshot_file.exists():
+        return None
+    try:
+        snap = json.loads(snapshot_file.read_text(encoding="utf-8"))
+        indices = snap.get("indices") if isinstance(snap, dict) else None
+        if not isinstance(indices, dict):
+            return None
+        dsex_num = _parse_float(indices.get("dsex"))
+        ds30_num = _parse_float(indices.get("ds30"))
+        dsex_str = f"{dsex_num:,.2f}" if _is_valid_dsex_value(dsex_num) else ""
+        ds30_str = f"{ds30_num:,.2f}" if _is_valid_ds30_value(ds30_num) else "—"
+        updated_str = str(snap.get("generated_at_bst") or "").strip()
+        if dsex_str or ds30_str != "—":
+            return dsex_str, ds30_str, updated_str
+    except Exception as exc:
+        logger.debug("Failed loading market_snapshot.json indices: %s", exc)
+    return None
+
+
+def _load_cached_ds30_fallback() -> str:
+    if MARKET_LIVE_CACHE_FILE.exists():
+        try:
+            saved = json.loads(MARKET_LIVE_CACHE_FILE.read_text(encoding="utf-8"))
+            if isinstance(saved, dict):
+                ds30_num = _parse_float(saved.get("ds30"))
+                if _is_valid_ds30_value(ds30_num):
+                    return f"{ds30_num:,.2f}"
+        except Exception:
+            pass
+    snap_indices = _load_market_snapshot_indices()
+    if snap_indices and snap_indices[1] != "—":
+        return snap_indices[1]
+    return "—"
 
 
 async def _scrape_dse_indices_fallback() -> tuple[str, str] | None:
@@ -1930,33 +2180,50 @@ async def _scrape_dse_indices_fallback() -> tuple[str, str] | None:
 
         # 1. New Next.js SSR JSON embedded on https://www.dsebd.org/
         unesc = resp.text.replace('\\"', '"')
-        dsex_json = re.search(r'"key":"DSEX","value":([0-9.]+)', unesc)
-        ds30_json = re.search(r'"key":"DS30","value":([0-9.]+)', unesc)
+        dsex_json = re.search(r'"key"\s*:\s*"DSEX"\s*,\s*"value"\s*:\s*"?([0-9,.]+)"?', unesc)
+        ds30_json = re.search(r'"key"\s*:\s*"DS30"\s*,\s*"value"\s*:\s*"?([0-9,.]+)"?', unesc)
         dsex_num = _parse_float(dsex_json.group(1)) if dsex_json else 0.0
         ds30_num = _parse_float(ds30_json.group(1)) if ds30_json else 0.0
 
-        # Streaming SSR fallback: extract latest point from initialIntraday DSEX series
+        # Streaming SSR fallback: extract latest point from initialIntraday DSEX & DS30 series
         if not _is_valid_dsex_value(dsex_num):
-            intra_m = re.search(r'"initialIntraday":\{"key":"DSEX","points":\[(.*?)\]', unesc)
+            intra_m = re.search(r'"initialIntraday"\s*:\s*\{\s*"key"\s*:\s*"DSEX"\s*,\s*"points"\s*:\s*\[(.*?)\]', unesc)
             if intra_m:
-                pts = re.findall(r'"value":([0-9.]+)', intra_m.group(1))
+                pts = re.findall(r'"value"\s*:\s*([0-9.]+)', intra_m.group(1))
                 if pts:
                     dsex_num = _parse_float(pts[-1])
+
+        if not _is_valid_ds30_value(ds30_num):
+            ds30_intra_m = re.search(
+                r'"key"\s*:\s*"DS30"[^\}]{0,160}?"points"\s*:\s*\[(.*?)\]',
+                unesc,
+            )
+            if ds30_intra_m:
+                pts = re.findall(r'"value"\s*:\s*([0-9.]+)', ds30_intra_m.group(1))
+                if pts:
+                    cand_ds30 = _parse_float(pts[-1])
+                    if _is_valid_ds30_value(cand_ds30):
+                        ds30_num = cand_ds30
+
+        # 2. Legacy / visible DOM text fallback for any still-missing index
+        if not _is_valid_dsex_value(dsex_num) or not _is_valid_ds30_value(ds30_num):
+            text = BeautifulSoup(resp.text, "html.parser").get_text(" ", strip=True)
+            if not _is_valid_dsex_value(dsex_num):
+                dsex_match = re.search(r"DSEX\s*(?:Index)?\s*[:\-]?\s*([0-9,]+\.\d+)", text, re.IGNORECASE)
+                if dsex_match:
+                    cand = _parse_float(dsex_match.group(1))
+                    if _is_valid_dsex_value(cand):
+                        dsex_num = cand
+            if not _is_valid_ds30_value(ds30_num):
+                ds30_match = re.search(r"DS\s*30\s*(?:Index)?\s*[:\-]?\s*([0-9,]+\.\d+)", text, re.IGNORECASE)
+                if ds30_match:
+                    cand = _parse_float(ds30_match.group(1))
+                    if _is_valid_ds30_value(cand):
+                        ds30_num = cand
 
         if _is_valid_dsex_value(dsex_num):
             ds30_fmt = f"{ds30_num:,.2f}" if _is_valid_ds30_value(ds30_num) else "—"
             return f"{dsex_num:,.2f}", ds30_fmt
-
-        # 2. Legacy text pattern fallback
-        text = BeautifulSoup(resp.text, "html.parser").get_text(" ", strip=True)
-        dsex_match = re.search(r"DSEX\s+Index\s+([0-9,]+\.\d+)", text, re.IGNORECASE)
-        ds30_match = re.search(r"DS30\s+Index\s+([0-9,]+\.\d+)", text, re.IGNORECASE)
-        if dsex_match:
-            dsex_num = _parse_float(dsex_match.group(1))
-            ds30_num = _parse_float(ds30_match.group(1)) if ds30_match else 0.0
-            if _is_valid_dsex_value(dsex_num):
-                ds30_fmt = f"{ds30_num:,.2f}" if _is_valid_ds30_value(ds30_num) else "—"
-                return f"{dsex_num:,.2f}", ds30_fmt
     except Exception as exc:
         logger.debug("DSE homepage index scrape failed: %s", exc)
     return None
@@ -1994,6 +2261,8 @@ async def get_live_ticker() -> dict[str, Any]:
     cached = cache_get("market_live")
     if cached and _is_valid_dsex_value(_parse_float(cached.get("dsex"))):
         out = dict(cached)
+        if not _is_valid_ds30_value(_parse_float(out.get("ds30"))):
+            out["ds30"] = _load_cached_ds30_fallback()
         out["session"] = session
         return out
 
@@ -2025,6 +2294,8 @@ async def get_live_ticker() -> dict[str, Any]:
             ds30_val = bd_ds30
 
     if dsex_val:
+        if ds30_val == "—":
+            ds30_val = _load_cached_ds30_fallback()
         payload = {
             "status": "live" if session["is_live"] else "closing",
             "is_stale": False,
@@ -2040,8 +2311,23 @@ async def get_live_ticker() -> dict[str, Any]:
     # Persisted Real Closing Index Cache (validated numeric range)
     persisted = _load_market_live_cache(session)
     if persisted:
+        if not _is_valid_ds30_value(_parse_float(persisted.get("ds30"))):
+            persisted["ds30"] = _load_cached_ds30_fallback()
         cache_set("market_live", persisted, ttl_seconds=120)
         return persisted
+
+    snap_indices = _load_market_snapshot_indices()
+    if snap_indices and snap_indices[0]:
+        snap_payload = {
+            "status": "live" if session["is_live"] else "closing",
+            "is_stale": True,
+            "dsex": snap_indices[0],
+            "ds30": snap_indices[1],
+            "updated": snap_indices[2] or session["bd_time"],
+            "session": session,
+        }
+        cache_set("market_live", snap_payload, ttl_seconds=60)
+        return snap_payload
 
     return {
         "status": "degraded",
@@ -2302,13 +2588,34 @@ async def verify_subscriber_session(payload: SubscriberSessionPayload) -> dict[s
         return {
             "valid": False,
             "active": False,
-            "subscribed": True,
+            "subscribed": False,
             "revoked": False,
-            "reason": "SESSION_REPLACED",
+            "reason": "UNVERIFIED",
         }
 
     key = _subscriber_key(normalized_mobile)
-    return verify_subscriber_session_record(key, token)
+    result = verify_subscriber_session_record(key, token)
+    if result.get("reason") != "UNVERIFIED":
+        return result
+
+    # Unknown/unclaimed MSISDN locally (e.g. cold Render restart or unauthenticated probe):
+    # only adopt into the session store if BDApps confirms an active subscription.
+    is_active, _status = await _check_bdapps_status_detailed(
+        payload.subscriberId,
+        normalized_mobile,
+    )
+    if is_active is True:
+        adopted = claim_subscriber_session_record(key, token)
+        return {
+            "valid": True,
+            "active": True,
+            "subscribed": True,
+            "revoked": False,
+            "reason": "OK",
+            "updatedAt": adopted["updatedAt"],
+        }
+
+    return result
 
 
 async def _revoke_subscriber_session_impl(payload: SubscriberRevokePayload) -> dict[str, Any]:
@@ -2375,9 +2682,6 @@ async def _relay_to_bdapps_php(endpoint_key: str, payload: BdappsRelayRequest) -
     if not candidates:
         raise HTTPException(status_code=502, detail="BDApps relay host is not allowlisted.")
 
-    if _http_client is None:
-        raise HTTPException(status_code=503, detail="HTTP relay client unavailable.")
-
     form_fields: dict[str, str] = {}
     if php_file in {"check_subscription.php", "send_otp.php"}:
         user_mobile = (payload.user_mobile or payload.mobile or "").strip()
@@ -2399,32 +2703,23 @@ async def _relay_to_bdapps_php(endpoint_key: str, payload: BdappsRelayRequest) -
         if user_mobile:
             form_fields["user_mobile"] = user_mobile
 
-    last_exc: Exception | None = None
-    last_status = 502
-    for base_url in candidates:
-        target_url = f"{base_url}/{php_file}"
-        if php_file == "check_subscription.php":
-            target_url = f"{target_url}?_t={int(time.time() * 1000)}"
+    path_with_query = (
+        f"{php_file}?_t={int(time.time() * 1000)}"
+        if php_file == "check_subscription.php"
+        else php_file
+    )
 
-        try:
-            resp = await _http_client.post(
-                target_url,
-                data=form_fields,
-                headers={"Accept": "application/json, text/plain, */*"},
-                timeout=BDAPPS_RELAY_TIMEOUT,
-            )
-            last_status = resp.status_code
-            try:
-                body = resp.json()
-                if isinstance(body, dict):
-                    return JSONResponse(status_code=resp.status_code, content=body)
-            except Exception:
-                pass
-        except Exception as exc:
-            last_exc = exc
-            logger.warning("BDApps server-to-server relay failed for %s on %s: %s", php_file, base_url, exc)
+    last_status, body, last_exc = await _post_bdapps_php(
+        candidates,
+        path_with_query,
+        form_fields,
+        timeout_seconds=BDAPPS_RELAY_TIMEOUT,
+    )
+    if body is not None:
+        return JSONResponse(status_code=last_status, content=body)
 
     if last_exc is None:
+        logger.warning("BDApps relay %s failed with HTTP %s and non-JSON payload.", php_file, last_status)
         return JSONResponse(
             status_code=last_status if last_status >= 400 else 502,
             content={
@@ -2432,6 +2727,13 @@ async def _relay_to_bdapps_php(endpoint_key: str, payload: BdappsRelayRequest) -
                 "error": "BDApps PHP relay returned an invalid response.",
             },
         )
+    logger.warning(
+        "BDApps relay %s exhausted all candidates (%s: %s, cause=%r)",
+        php_file,
+        type(last_exc).__name__,
+        last_exc,
+        last_exc.__cause__,
+    )
     return JSONResponse(
         status_code=502,
         content={

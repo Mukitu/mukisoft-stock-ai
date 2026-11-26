@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Loader2, Lock, RefreshCw, RotateCcw } from 'lucide-react';
 import type { Exchange } from '../types/market';
@@ -37,8 +37,16 @@ export function MarketTerminalPage() {
     rsi: true,
   });
 
+  const [authorizedKey, setAuthorizedKey] = useState<string>('');
+  const [isAuthorizingQuota, setIsAuthorizingQuota] = useState(false);
+  const [quotaBlocked, setQuotaBlocked] = useState(false);
   const [paywallOpen, setPaywallOpen] = useState(false);
-  const { isSubscribed, liveResetSeconds, markSubscribed } = useFreeQuota();
+  const {
+    isSubscribed,
+    liveResetSeconds,
+    authorizeSymbolAnalysis,
+    markSubscribed,
+  } = useFreeQuota();
 
   // For active subscribers opening /market directly (e.g., from Dashboard or Navbar),
   // automatically load the default sector stock instead of leaving an empty placeholder.
@@ -50,30 +58,87 @@ export function MarketTerminalPage() {
     }
   }, [isSubscribed, symbol, sector]);
 
+  const currentQueryKey = symbol ? `${exchange}:${symbol}` : '';
+  const canRunLiveQuery =
+    symbol.length > 0 &&
+    !quotaBlocked &&
+    (isSubscribed || authorizedKey === currentQueryKey);
+
   const {
-    data: analysis,
+    data: rawAnalysis,
     isFetching,
     isError,
     error: queryError,
     refetch,
-  } = useStockAnalysis(symbol, exchange, symbol.length > 0);
-  const isQuotaError = !isSubscribed && queryError instanceof QuotaExceededError;
+  } = useStockAnalysis(symbol, exchange, canRunLiveQuery);
+  const isQuotaError = !isSubscribed && (quotaBlocked || queryError instanceof QuotaExceededError);
+  const analysis = isQuotaError ? undefined : rawAnalysis;
   const report = analysis ? buildStructuredBanglaReport(analysis) : null;
+
+  const authorizeLiveSymbol = useCallback(
+    async (sym: string, exch: Exchange) => {
+      const clean = sym.trim().toUpperCase();
+      if (!clean) return;
+      const key = `${exch}:${clean}`;
+
+      if (isSubscribed) {
+        setQuotaBlocked(false);
+        setAuthorizedKey(key);
+        return;
+      }
+
+      setIsAuthorizingQuota(true);
+      try {
+        const res = await authorizeSymbolAnalysis(clean);
+        if (!res.allowed) {
+          setQuotaBlocked(true);
+          setAuthorizedKey('');
+          setPaywallOpen(true);
+          return;
+        }
+        setQuotaBlocked(false);
+        setAuthorizedKey(key);
+      } finally {
+        setIsAuthorizingQuota(false);
+      }
+    },
+    [authorizeSymbolAnalysis, isSubscribed]
+  );
+
+  // Authorize initial symbol or deep-link/dropdown changes through server-enforced 24h quota
+  useEffect(() => {
+    if (!symbol || quotaBlocked) return;
+    if (isSubscribed) {
+      setQuotaBlocked(false);
+      setAuthorizedKey(`${exchange}:${symbol}`);
+      return;
+    }
+    if (authorizedKey === `${exchange}:${symbol}`) {
+      return;
+    }
+    void authorizeLiveSymbol(symbol, exchange);
+  }, [symbol, exchange, isSubscribed, authorizedKey, quotaBlocked, authorizeLiveSymbol]);
 
   useEffect(() => {
     if (isSubscribed) {
+      setQuotaBlocked(false);
       setPaywallOpen(false);
       return;
     }
-    if (isQuotaError) {
+    if (queryError instanceof QuotaExceededError) {
+      setQuotaBlocked(true);
+      setAuthorizedKey('');
       setPaywallOpen(true);
     }
-  }, [isQuotaError, isSubscribed]);
+  }, [isSubscribed, queryError]);
 
   const updateSelection = (nextSym: string, nextExch: Exchange) => {
-    setSymbol(nextSym);
+    const clean = nextSym.trim().toUpperCase();
+    setQuotaBlocked(false);
+    setAuthorizedKey('');
+    setSymbol(clean);
     setExchange(nextExch);
-    setSearchParams({ symbol: nextSym, exchange: nextExch });
+    setSearchParams(clean ? { symbol: clean, exchange: nextExch } : { exchange: nextExch });
   };
 
   const toggleKey = (key: keyof TerminalIndicatorToggles) => {
@@ -261,7 +326,7 @@ export function MarketTerminalPage() {
           <div className="py-16 text-center text-sm text-slate-600">
             লাইভ ক্যান্ডেলস্টিক চার্ট ও সূচক দেখতে উপরের তালিকা থেকে একটি কোম্পানি নির্বাচন করুন।
           </div>
-        ) : isFetching && !analysis ? (
+        ) : (isFetching || isAuthorizingQuota) && !analysis ? (
           <div className="py-16 text-center space-y-3">
             <Loader2 className="w-8 h-8 text-blue-700 animate-spin mx-auto" />
             <p className="text-sm font-semibold text-slate-800">{LIVE_FEED_WAITING_BN}</p>
@@ -332,6 +397,8 @@ export function MarketTerminalPage() {
         onClose={() => setPaywallOpen(false)}
         onSubscribed={() => {
           markSubscribed();
+          setQuotaBlocked(false);
+          if (symbol) setAuthorizedKey(`${exchange}:${symbol}`);
           setPaywallOpen(false);
           void refetch();
         }}

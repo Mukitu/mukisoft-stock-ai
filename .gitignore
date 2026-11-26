@@ -4,6 +4,7 @@ node_modules/
 backend/.env
 backend/__pycache__/
 backend/*.pyc
+scripts/__pycache__/
 backend/daily_picks_cache.json
 backend/free_quota_store.json
 cpanel_php/config.php
