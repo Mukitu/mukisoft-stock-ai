@@ -11,6 +11,10 @@ export const BDAPPS_API_BASE = (
 ).replace(/\/+$/, '');
 
 export const BDAPPS_SESSION_KEY = 'ms_bdapps_session';
+export const BDAPPS_MSISDN_KEY = 'ms_bdapps_msisdn';
+export const BDAPPS_COOKIE_NAME = 'ms_bdapps_session';
+export const BDAPPS_MSISDN_COOKIE_NAME = 'ms_bdapps_msisdn';
+export const BDAPPS_COOKIE_MAX_AGE_SECONDS = 31_536_000; // 365 days
 export const BDAPPS_PENDING_KEY = 'ms_bdapps_pending';
 export const BDAPPS_TOAST_KEY = 'ms_bdapps_toast';
 export const BDAPPS_ACTIVE_LOCK_KEY = 'ms_bdapps_active_lock_v1';
@@ -33,6 +37,8 @@ export interface BdappsSession {
   subscriptionStatus: string;
   statusCode: string;
   mobile: string;
+  msisdn?: string;
+  localMobile?: string;
   verifiedAt: number;
   source: 'check_subscription' | 'send_otp' | 'verify_otp';
   consentAccepted: boolean;
@@ -62,9 +68,32 @@ export interface BdappsApiResponse {
   referenceNo?: string;
   message?: string;
   error?: string;
+  _httpOk?: boolean;
+  _httpStatus?: number;
 }
 
 export const ROBI_CIRKLE_DIGITS_REGEX = /^1[3-9][0-9]{8}$/;
+
+/**
+ * Normalizes any BD mobile / tel: subscriberId to 13-digit MSISDN (8801XXXXXXXXX).
+ */
+export function normalizeBdMsisdn(raw: string): string {
+  let digits = String(raw || '').replace(/\D/g, '');
+  if (digits.startsWith('01') && digits.length === 11) {
+    digits = `88${digits}`;
+  } else if (digits.startsWith('1') && digits.length === 10) {
+    digits = `880${digits}`;
+  }
+  return /^8801[3-9][0-9]{8}$/.test(digits) ? digits : '';
+}
+
+/**
+ * Normalizes any BD mobile / tel: subscriberId to 11-digit local mobile (01XXXXXXXXX).
+ */
+export function normalizeBdLocalMobile(raw: string): string {
+  const msisdn = normalizeBdMsisdn(raw);
+  return msisdn ? `0${msisdn.slice(3)}` : '';
+}
 
 /**
  * Strips non-digits and optional leading 880 / 0 prefixes to yield up to 10 digits (1XXXXXXXXX).
@@ -168,12 +197,14 @@ export function isOtpChallengePayload(data: BdappsApiResponse | null | undefined
 
 export function isUnregisteredPayload(data: BdappsApiResponse | null | undefined): boolean {
   if (!data) return false;
+  // Never log out on transient gateway/HTTP errors (e.g., 500, 502, 503, 504)
+  if (data._httpOk === false) return false;
   if (isActiveSubscriptionPayload(data)) return false;
   const status = normalizeSubscriptionStatus(data.subscriptionStatus);
   if (status === 'UNREGISTERED' || status === 'DEREGISTERED' || status === 'EXPIRED') {
     return true;
   }
-  return data.isSubscribed === false;
+  return data.isSubscribed === false && !data.error;
 }
 
 export function isSessionActive(session: BdappsSession | null | undefined): session is BdappsSession {
@@ -245,59 +276,165 @@ export function isLocalSessionLockConflict(session: BdappsSession | null | undef
   return lock.subscriberKey === myKey && lock.sessionToken !== session.sessionToken;
 }
 
-export function getBdappsSession(): BdappsSession | null {
+function enrichSessionRecord(parsed: Partial<BdappsSession>): BdappsSession | null {
+  if (!parsed || typeof parsed.mobile !== 'string' || !parsed.mobile.trim()) {
+    return null;
+  }
+  const msisdn = normalizeBdMsisdn(parsed.msisdn || parsed.mobile || parsed.subscriberId || '');
+  const localMobile = normalizeBdLocalMobile(parsed.localMobile || msisdn || parsed.mobile);
+  const mobile = msisdn ? `+${msisdn}` : parsed.mobile.trim();
+  const subscriptionStatus = String(parsed.subscriptionStatus || 'REGISTERED');
+  if (!isAuthenticatedStatus(subscriptionStatus)) {
+    return null;
+  }
+
+  return {
+    subscriberId: String(parsed.subscriberId || (msisdn ? `tel:${msisdn}` : '')),
+    subscriptionStatus,
+    statusCode: String(parsed.statusCode || 'S1000'),
+    mobile,
+    msisdn: msisdn || undefined,
+    localMobile: localMobile || undefined,
+    verifiedAt: Number(parsed.verifiedAt || Date.now()),
+    source: parsed.source || 'check_subscription',
+    consentAccepted: parsed.consentAccepted ?? true,
+    consentTimestamp: String(parsed.consentTimestamp || new Date().toISOString()),
+    sessionToken: String(parsed.sessionToken || generateSessionToken()),
+  };
+}
+
+function getCookieAttributes(maxAgeSeconds: number): string {
+  const isHttps = typeof window !== 'undefined' && window.location.protocol === 'https:';
+  const securePart = isHttps ? '; Secure' : '';
+  return `SameSite=Lax${securePart}; path=/; max-age=${maxAgeSeconds}`;
+}
+
+function readCookieValue(name: string): string | null {
   try {
-    const raw = window.sessionStorage.getItem(BDAPPS_SESSION_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as Partial<BdappsSession>;
-    if (!parsed || typeof parsed.mobile !== 'string') return null;
-    if (!parsed.sessionToken) {
-      const migrated: BdappsSession = {
-        subscriberId: String(parsed.subscriberId || ''),
-        subscriptionStatus: String(parsed.subscriptionStatus || 'REGISTERED'),
-        statusCode: String(parsed.statusCode || 'S1000'),
-        mobile: parsed.mobile,
-        verifiedAt: Number(parsed.verifiedAt || Date.now()),
-        source: parsed.source || 'check_subscription',
-        consentAccepted: parsed.consentAccepted ?? true,
-        consentTimestamp: String(parsed.consentTimestamp || new Date().toISOString()),
-        sessionToken: generateSessionToken(),
-      };
-      window.sessionStorage.setItem(BDAPPS_SESSION_KEY, JSON.stringify(migrated));
-      return migrated;
+    if (typeof document === 'undefined' || !document.cookie) return null;
+    const prefix = `${name}=`;
+    for (const part of document.cookie.split(';')) {
+      const trimmed = part.trim();
+      if (trimmed.startsWith(prefix)) {
+        return decodeURIComponent(trimmed.slice(prefix.length));
+      }
     }
-    return parsed as BdappsSession;
+    return null;
   } catch {
     return null;
   }
+}
+
+function writeBdappsCookies(session: BdappsSession): void {
+  try {
+    if (typeof document === 'undefined') return;
+    const attrs = getCookieAttributes(BDAPPS_COOKIE_MAX_AGE_SECONDS);
+    const msisdn = normalizeBdMsisdn(session.msisdn || session.mobile || session.subscriberId);
+    if (msisdn) {
+      document.cookie = `${BDAPPS_MSISDN_COOKIE_NAME}=${encodeURIComponent(msisdn)}; ${attrs}`;
+    }
+    document.cookie = `${BDAPPS_COOKIE_NAME}=${encodeURIComponent(JSON.stringify(session))}; ${attrs}`;
+  } catch {
+    // Ignore cookie errors
+  }
+}
+
+export function getBdappsSession(): BdappsSession | null {
+  try {
+    const lsRaw = window.localStorage.getItem(BDAPPS_SESSION_KEY);
+    if (lsRaw) {
+      const parsed = enrichSessionRecord(JSON.parse(lsRaw) as Partial<BdappsSession>);
+      if (parsed) {
+        // Ensure sessionStorage and 365-day cookies remain hydrated
+        try {
+          window.sessionStorage.setItem(BDAPPS_SESSION_KEY, JSON.stringify(parsed));
+          if (parsed.msisdn && !window.localStorage.getItem(BDAPPS_MSISDN_KEY)) {
+            window.localStorage.setItem(BDAPPS_MSISDN_KEY, parsed.msisdn);
+          }
+        } catch {
+          // Ignore
+        }
+        if (!readCookieValue(BDAPPS_COOKIE_NAME)) {
+          writeBdappsCookies(parsed);
+        }
+        return parsed;
+      }
+    }
+
+    const ssRaw = window.sessionStorage.getItem(BDAPPS_SESSION_KEY);
+    if (ssRaw) {
+      const parsed = enrichSessionRecord(JSON.parse(ssRaw) as Partial<BdappsSession>);
+      if (parsed) {
+        persistSessionToAllStores(parsed, { updateLocalLock: true });
+        return parsed;
+      }
+    }
+
+    const cookieRaw = readCookieValue(BDAPPS_COOKIE_NAME);
+    if (cookieRaw) {
+      const parsed = enrichSessionRecord(JSON.parse(cookieRaw) as Partial<BdappsSession>);
+      if (parsed) {
+        persistSessionToAllStores(parsed, { updateLocalLock: true });
+        return parsed;
+      }
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function persistSessionToAllStores(
+  session: BdappsSession,
+  options?: { updateLocalLock?: boolean }
+): BdappsSession {
+  const enriched = enrichSessionRecord(session) || session;
+  try {
+    const serialized = JSON.stringify(enriched);
+    window.localStorage.setItem(BDAPPS_SESSION_KEY, serialized);
+    if (enriched.msisdn) {
+      window.localStorage.setItem(BDAPPS_MSISDN_KEY, enriched.msisdn);
+    }
+    window.sessionStorage.setItem(BDAPPS_SESSION_KEY, serialized);
+    writeBdappsCookies(enriched);
+    if (options?.updateLocalLock !== false) {
+      writeLocalActiveSessionLock(enriched);
+    }
+  } catch {
+    // Ignore storage quota errors
+  }
+  return enriched;
 }
 
 export function saveBdappsSession(
   session: BdappsSession,
   options?: { updateLocalLock?: boolean }
 ): void {
+  const enriched = persistSessionToAllStores(session, options);
   try {
-    window.sessionStorage.setItem(BDAPPS_SESSION_KEY, JSON.stringify(session));
-    if (options?.updateLocalLock !== false) {
-      writeLocalActiveSessionLock(session);
-    }
-    window.dispatchEvent(new CustomEvent(BDAPPS_SESSION_EVENT, { detail: session }));
+    window.dispatchEvent(new CustomEvent(BDAPPS_SESSION_EVENT, { detail: enriched }));
   } catch {
-    // Ignore storage quota errors
+    // Ignore event errors
   }
 }
 
 export function clearBdappsCookies(): void {
   try {
-    if (typeof document === 'undefined' || !document.cookie) return;
-    const cookies = document.cookie.split(';');
-    for (const rawCookie of cookies) {
-      const eqPos = rawCookie.indexOf('=');
-      const name = (eqPos > -1 ? rawCookie.slice(0, eqPos) : rawCookie).trim();
-      if (!name) continue;
-      if (/bdapps|subscriber|ms_bdapps|ms_free_quota|session_token/i.test(name)) {
-        document.cookie = `${name}=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/`;
+    if (typeof document === 'undefined') return;
+    const names = new Set<string>([BDAPPS_COOKIE_NAME, BDAPPS_MSISDN_COOKIE_NAME]);
+    if (document.cookie) {
+      for (const rawCookie of document.cookie.split(';')) {
+        const eqPos = rawCookie.indexOf('=');
+        const name = (eqPos > -1 ? rawCookie.slice(0, eqPos) : rawCookie).trim();
+        if (name && /bdapps|subscriber|ms_bdapps|ms_free_quota|session_token/i.test(name)) {
+          names.add(name);
+        }
       }
+    }
+    for (const name of names) {
+      document.cookie = `${name}=; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; SameSite=Lax`;
+      document.cookie = `${name}=; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; SameSite=Lax; Secure`;
     }
   } catch {
     // Ignore cookie errors
@@ -312,6 +449,7 @@ export function purgeAllSubscriberState(options?: {
     window.sessionStorage.removeItem(BDAPPS_SESSION_KEY);
     window.sessionStorage.removeItem(BDAPPS_PENDING_KEY);
     window.localStorage.removeItem(BDAPPS_SESSION_KEY);
+    window.localStorage.removeItem(BDAPPS_MSISDN_KEY);
     window.localStorage.removeItem(BDAPPS_PENDING_KEY);
     window.localStorage.removeItem(QUOTA_STORAGE_KEY_REF);
 
@@ -409,7 +547,8 @@ export function consumeBdappsToast(): string | null {
 async function postFormEndpoint(
   endpoint: string,
   fields: Record<string, string>,
-  timeoutMs = 15_000
+  timeoutMs = 15_000,
+  fetchOptions?: RequestInit
 ): Promise<BdappsApiResponse> {
   const controller = new AbortController();
   const timer = window.setTimeout(() => controller.abort(), timeoutMs);
@@ -417,10 +556,12 @@ async function postFormEndpoint(
   try {
     const body = new URLSearchParams(fields);
     const res = await fetch(`${BDAPPS_API_BASE}/${endpoint}`, {
+      ...fetchOptions,
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
         Accept: 'application/json, text/plain, */*',
+        ...(fetchOptions?.headers || {}),
       },
       body: body.toString(),
       signal: controller.signal,
@@ -436,6 +577,9 @@ async function postFormEndpoint(
         message: text || undefined,
       };
     }
+
+    parsed._httpOk = res.ok;
+    parsed._httpStatus = res.status;
 
     if (!res.ok && !parsed.message && !parsed.statusDetail && !parsed.error) {
       parsed.error = `সার্ভার থেকে সঠিক উত্তর পাওয়া যায়নি (HTTP ${res.status})।`;
@@ -453,13 +597,18 @@ async function postFormEndpoint(
 }
 
 /**
- * 1. Proactive Pre-check & Server Re-check
- * POST ${BDAPPS_API_BASE}/check_subscription.php with user_mobile=+8801XXXXXXXXX
+ * 1. Proactive Pre-check & Server Re-check (cache-busted with ?_t=timestamp & no-store)
+ * POST ${BDAPPS_API_BASE}/check_subscription.php?_t=... with user_mobile=+8801XXXXXXXXX
  */
 export async function checkBdappsSubscription(userMobile: string): Promise<BdappsApiResponse> {
-  return postFormEndpoint('check_subscription.php', {
-    user_mobile: userMobile,
-  });
+  return postFormEndpoint(
+    `check_subscription.php?_t=${Date.now()}`,
+    {
+      user_mobile: userMobile,
+    },
+    15_000,
+    { cache: 'no-store' }
+  );
 }
 
 /**
@@ -547,48 +696,66 @@ export async function verifyActiveSubscriberSession(
     return 'session_replaced';
   }
 
-  const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), 6_000);
+  const verifyBackendLock = async (): Promise<SessionVerifyResult> => {
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), 6_000);
+    try {
+      const res = await fetch(`${BACKEND_API_BASE}/api/subscriber-session/verify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({
+          mobile: session.mobile,
+          subscriberId: session.subscriberId,
+          sessionToken: session.sessionToken,
+          source: session.source,
+          verifiedAt: session.verifiedAt,
+        }),
+        signal: controller.signal,
+      });
 
-  try {
-    const res = await fetch(`${BACKEND_API_BASE}/api/subscriber-session/verify`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify({
-        mobile: session.mobile,
-        subscriberId: session.subscriberId,
-        sessionToken: session.sessionToken,
-        source: session.source,
-        verifiedAt: session.verifiedAt,
-      }),
-      signal: controller.signal,
-    });
-
-    if (res.ok) {
-      const data = (await res.json().catch(() => null)) as {
-        valid?: boolean;
-        reason?: string;
-      } | null;
-      if (data && data.valid === false) {
-        if (data.reason === 'SESSION_REPLACED') return 'session_replaced';
-        if (data.reason === 'UNSUBSCRIBED') return 'unsubscribed';
+      if (res.ok) {
+        const data = (await res.json().catch(() => null)) as {
+          valid?: boolean;
+          reason?: string;
+        } | null;
+        if (data && data.valid === false) {
+          if (data.reason === 'SESSION_REPLACED') return 'session_replaced';
+          if (data.reason === 'UNSUBSCRIBED') return 'unsubscribed';
+        }
       }
+    } catch {
+      // Transient network blip during cold start: do not falsely log out active subscriber
+    } finally {
+      window.clearTimeout(timer);
     }
-  } catch {
-    // Transient network blip during cold start: do not falsely log out active subscriber
-  } finally {
-    window.clearTimeout(timer);
-  }
+    return 'valid';
+  };
 
-  if (options?.checkServerSubscription && !isWithinFreshGraceWindow(session)) {
+  const verifyBdappsLiveStatus = async (): Promise<SessionVerifyResult> => {
+    if (!options?.checkServerSubscription) {
+      return 'valid';
+    }
     try {
       const subRes = await checkBdappsSubscription(session.mobile);
       if (isUnregisteredPayload(subRes)) {
         return 'unsubscribed';
       }
     } catch {
-      // Ignore transient network errors
+      // Ignore transient network errors or timeouts
     }
+    return 'valid';
+  };
+
+  const [bdappsVerdict, lockVerdict] = await Promise.all([
+    verifyBdappsLiveStatus(),
+    verifyBackendLock(),
+  ]);
+
+  if (bdappsVerdict === 'unsubscribed' || lockVerdict === 'unsubscribed') {
+    return 'unsubscribed';
+  }
+  if (lockVerdict === 'session_replaced') {
+    return 'session_replaced';
   }
 
   return 'valid';
@@ -633,14 +800,18 @@ export function buildActiveSessionFromResponse(
   const subscriptionStatus = isPendingChargingStatus(data.subscriptionStatus)
     ? 'INITIAL CHARGING PENDING'
     : 'REGISTERED';
-  const digits = mobile.replace(/\D/g, '');
+  const msisdn = normalizeBdMsisdn(mobile || data.subscriberId || '');
+  const localMobile = normalizeBdLocalMobile(msisdn || mobile);
+  const digits = msisdn || mobile.replace(/\D/g, '');
   const fallbackSubscriberId = `tel:${digits.startsWith('880') ? digits : `880${digits}`}`;
 
   return {
     subscriberId: String(data.subscriberId || fallbackSubscriberId),
     subscriptionStatus,
     statusCode: String(data.statusCode || 'S1000'),
-    mobile,
+    mobile: msisdn ? `+${msisdn}` : mobile,
+    msisdn: msisdn || undefined,
+    localMobile: localMobile || undefined,
     verifiedAt: Date.now(),
     source,
     consentAccepted: consent?.consentAccepted ?? true,

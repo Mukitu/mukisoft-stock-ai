@@ -82,7 +82,7 @@ HTTP_HEADERS = {
 # Core liquid DSE/CSE catalog symbols always included in the post-market ML cache
 CORE_CACHE_SYMBOLS: list[str] = [
     # Telecommunication
-    "GP", "ROBI", "BSCCL",
+    "GP", "ROBI", "BSCPLC",
     # Pharmaceuticals & Chemicals
     "ACMEPL", "SQURPHARMA", "RENATA", "BXPHARMA", "ACI", "ACIFORMULA", "BEACONPHAR",
     "ORIONPHARM", "ORIONINFU", "IBNSINA", "MARICO", "RECKITTBEN", "KOHINOOR",
@@ -103,15 +103,15 @@ CORE_CACHE_SYMBOLS: list[str] = [
     "FINEFOODS", "FUWANGFOOD", "LOVELLO", "RDFOOD", "GHAIL",
     # IT Sector
     "AAMRANET", "AAMRATECH", "AGNISYSL", "BDCOM", "DAFODILCOM",
-    "EGEN", "GENEXIL", "ITCON",
+    "EGEN", "GENEXIL", "ITC",
     # Financial Institutions (NBFI)
     "LANKABAFIN", "IDLC", "DBH", "IPDC", "ICB",
     # Textile & Garments
     "SQUARETEXT", "ENVOYTEX", "MALEKSPIN", "MATINSPINN", "ARGONDENIM",
-    "ACFL", "ESQUIRENIT", "HRTEXTILE", "SAIHAMTEX", "SONARGAON",
+    "ACFL", "ESQUIRENIT", "HRTEX", "SAIHAMTEX", "SONARGAON",
     # Cement & Ceramics
-    "LHBL", "HEIDELBCEM", "CONFIDCEM", "CROWNCEMNT", "PREMIERCEM",
-    "RAKCEC", "MONNOCERA", "FUWANGCER",
+    "LHB", "HEIDELBCEM", "CONFIDCEM", "CROWNCEMNT", "PREMIERCEM",
+    "RAKCERAMIC", "MONNOCERA", "FUWANGCER",
     # Insurance
     "DELTALIFE", "GREENDELT", "RELIANCINS", "PRAGATIINS", "PRAGATILIF",
     "PIONEERINS", "EASTLAND", "NITOLINS", "SONALILIFE",

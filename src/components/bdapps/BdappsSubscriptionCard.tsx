@@ -108,7 +108,8 @@ export function BdappsSubscriptionCard({
   // Keep inline card synced if user unsubscribes or logs in elsewhere
   useEffect(() => {
     const onSessionUpdated = (evt: Event) => {
-      const next = (evt as CustomEvent<BdappsSession | null>).detail ?? getBdappsSession();
+      const customEvt = evt as CustomEvent<BdappsSession | null>;
+      const next = 'detail' in customEvt ? customEvt.detail : getBdappsSession();
       if (isSessionActive(next)) {
         setActiveSession(next);
         if (!onSubscribed) setStep('verified');

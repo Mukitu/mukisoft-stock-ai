@@ -1,8 +1,12 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   BDAPPS_ACTIVE_LOCK_KEY,
+  BDAPPS_MSISDN_KEY,
+  BDAPPS_SESSION_EVENT,
+  BDAPPS_SESSION_KEY,
   SESSION_REPLACED_TOAST_BN,
+  UNSUBSCRIBED_TOAST_BN,
   getBdappsSession,
   isLocalSessionLockConflict,
   isSessionActive,
@@ -12,18 +16,23 @@ import {
 } from '../../services/bdappsService';
 
 const FOCUS_DEBOUNCE_MS = 1_000;
-const PERIODIC_SUB_CHECK_MS = 45_000;
+const SUBSCRIPTION_POLL_INTERVAL_MS = 30_000;
 
 export function SessionEnforcer() {
   const location = useLocation();
   const navigate = useNavigate();
 
+  const [hasActiveSession, setHasActiveSession] = useState<boolean>(() =>
+    isSessionActive(getBdappsSession())
+  );
+  const hasActiveSessionRef = useRef(hasActiveSession);
+  hasActiveSessionRef.current = hasActiveSession;
+
   const isCheckingRef = useRef(false);
   const lastCheckAtRef = useRef(0);
-  const lastSubRecheckAtRef = useRef(0);
 
   const enforceLogout = useCallback(
-    (reason: 'session_replaced' | 'unsubscribed', currentSessionToken: string) => {
+    (reason: 'session_replaced' | 'unsubscribed', currentSessionToken?: string) => {
       if (reason === 'session_replaced') {
         purgeAllSubscriberState({
           forceClearLock: false,
@@ -35,10 +44,9 @@ export function SessionEnforcer() {
           forceClearLock: true,
           currentSessionToken,
         });
-        setBdappsToast(
-          'আপনার Robi & Cirkle সাবস্ক্রিপশনটি বর্তমানে সক্রিয় নয়। পুনরায় অ্যাক্সেস পেতে নম্বর দিয়ে OTP ভেরিফাই করুন।'
-        );
+        setBdappsToast(UNSUBSCRIBED_TOAST_BN);
       }
+      setHasActiveSession(false);
       navigate('/', { replace: true });
     },
     [navigate]
@@ -47,7 +55,11 @@ export function SessionEnforcer() {
   const runSessionVerification = useCallback(
     async (options?: { force?: boolean; checkSubscription?: boolean }) => {
       const session = getBdappsSession();
-      if (!isSessionActive(session)) return;
+      if (!isSessionActive(session)) {
+        setHasActiveSession(false);
+        return;
+      }
+      setHasActiveSession(true);
 
       if (isLocalSessionLockConflict(session)) {
         enforceLogout('session_replaced', session.sessionToken);
@@ -63,16 +75,9 @@ export function SessionEnforcer() {
       isCheckingRef.current = true;
       lastCheckAtRef.current = now;
 
-      const shouldCheckSub =
-        Boolean(options?.checkSubscription) ||
-        now - lastSubRecheckAtRef.current >= PERIODIC_SUB_CHECK_MS;
-      if (shouldCheckSub) {
-        lastSubRecheckAtRef.current = now;
-      }
-
       try {
         const verdict = await verifyActiveSubscriberSession(session, {
-          checkServerSubscription: shouldCheckSub,
+          checkServerSubscription: options?.checkSubscription ?? true,
         });
 
         // Re-verify the active session is still the same token before acting
@@ -91,36 +96,79 @@ export function SessionEnforcer() {
     [enforceLogout]
   );
 
-  // 1. Check on every route navigation (skip initial freshHandoff to avoid racing claim)
+  // Sync active-session flag across in-tab login / logout events
+  useEffect(() => {
+    const onSessionUpdated = () => {
+      setHasActiveSession(isSessionActive(getBdappsSession()));
+    };
+    window.addEventListener(BDAPPS_SESSION_EVENT, onSessionUpdated);
+    return () => window.removeEventListener(BDAPPS_SESSION_EVENT, onSessionUpdated);
+  }, []);
+
+  // 1. Check on initial mount and every route navigation (skip freshHandoff to avoid racing claim)
   useEffect(() => {
     const state = location.state as { freshHandoff?: boolean } | null;
     if (location.pathname === '/dashboard' && state?.freshHandoff) {
+      setHasActiveSession(isSessionActive(getBdappsSession()));
       return;
     }
     void runSessionVerification({
       force: true,
-      checkSubscription: location.pathname === '/dashboard',
+      checkSubscription: true,
     });
   }, [location.pathname, location.state, runSessionVerification]);
 
-  // 2. Check on tab focus (visibilitychange & window.focus) + cross-tab localStorage lock event
+  // 2. Lightweight 30-second background polling against check_subscription.php?_t=... whenever subscribed
+  useEffect(() => {
+    if (!hasActiveSession) return;
+    const pollId = window.setInterval(() => {
+      void runSessionVerification({
+        force: true,
+        checkSubscription: true,
+      });
+    }, SUBSCRIPTION_POLL_INTERVAL_MS);
+
+    return () => window.clearInterval(pollId);
+  }, [hasActiveSession, runSessionVerification]);
+
+  // 3. Check on tab focus (visibilitychange & window.focus) + instantaneous cross-tab storage sync
   useEffect(() => {
     const onVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
-        void runSessionVerification();
+        void runSessionVerification({ checkSubscription: true });
       }
     };
 
     const onWindowFocus = () => {
-      void runSessionVerification();
+      void runSessionVerification({ checkSubscription: true });
     };
 
     const onStorageChange = (evt: StorageEvent) => {
-      if (evt.key !== BDAPPS_ACTIVE_LOCK_KEY) return;
-      const session = getBdappsSession();
-      if (!isSessionActive(session)) return;
-      if (isLocalSessionLockConflict(session)) {
-        enforceLogout('session_replaced', session.sessionToken);
+      // Instant multi-tab global logout when localStorage session/msisdn is cleared
+      if (
+        evt.key === null ||
+        ((evt.key === BDAPPS_SESSION_KEY || evt.key === BDAPPS_MSISDN_KEY) && !evt.newValue)
+      ) {
+        if (hasActiveSessionRef.current || isSessionActive(getBdappsSession())) {
+          enforceLogout('unsubscribed');
+        }
+        return;
+      }
+
+      // Sync if another tab in the same browser activated a subscription
+      if (evt.key === BDAPPS_SESSION_KEY && evt.newValue) {
+        const hydrated = getBdappsSession();
+        setHasActiveSession(isSessionActive(hydrated));
+        window.dispatchEvent(new CustomEvent(BDAPPS_SESSION_EVENT, { detail: hydrated }));
+        return;
+      }
+
+      if (evt.key === BDAPPS_ACTIVE_LOCK_KEY) {
+        const session = getBdappsSession();
+        if (!isSessionActive(session)) return;
+        if (isLocalSessionLockConflict(session)) {
+          enforceLogout('session_replaced', session.sessionToken);
+        }
       }
     };
 

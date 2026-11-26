@@ -51,6 +51,10 @@ export function useFreeQuota() {
       }
     };
     const onSessionChanged = () => {
+      const nextLocal = readStoredQuotaState();
+      setQuota(nextLocal);
+      setLiveResetSeconds(computeLiveResetSeconds(nextLocal));
+      hasTriggeredAutoResetRef.current = false;
       void refreshQuota();
     };
     window.addEventListener(QUOTA_UPDATED_EVENT, onUpdated);

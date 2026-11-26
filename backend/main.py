@@ -97,7 +97,7 @@ SECTOR_CATALOG: dict[str, list[str]] = {
         "MTB", "UCB", "BANKASIA", "DHAKABANK", "IFIC", "JAMUNABANK",
         "NCCBANK", "TRUSTBANK", "UTTARABANK", "ISLAMIBANK",
     ],
-    "Telecommunication": ["GP", "ROBI", "BSCCL"],
+    "Telecommunication": ["GP", "ROBI", "BSCPLC"],
     "Engineering": [
         "WALTONHIL", "BSRMSTEEL", "BSRMLTD", "GPHISPAT", "SINGERBD", "RUNNERAUTO",
         "BBSCABLES", "BDLAMPS", "IFADAUTOS", "KDSALTD", "MIRAKHTER", "NAHEEACP",
@@ -113,16 +113,16 @@ SECTOR_CATALOG: dict[str, list[str]] = {
     ],
     "IT Sector": [
         "AAMRANET", "AAMRATECH", "AGNISYSL", "BDCOM", "DAFODILCOM",
-        "EGEN", "GENEXIL", "ITCON",
+        "EGEN", "GENEXIL", "ITC",
     ],
     "Financial Institutions (NBFI)": ["LANKABAFIN", "IDLC", "DBH", "IPDC", "ICB"],
     "Textile & Garments": [
         "SQUARETEXT", "ENVOYTEX", "MALEKSPIN", "MATINSPINN", "ARGONDENIM",
-        "ACFL", "ESQUIRENIT", "HRTEXTILE", "SAIHAMTEX", "SONARGAON",
+        "ACFL", "ESQUIRENIT", "HRTEX", "SAIHAMTEX", "SONARGAON",
     ],
     "Cement & Ceramics": [
-        "LHBL", "HEIDELBCEM", "CONFIDCEM", "CROWNCEMNT", "PREMIERCEM",
-        "RAKCEC", "MONNOCERA", "FUWANGCER",
+        "LHB", "HEIDELBCEM", "CONFIDCEM", "CROWNCEMNT", "PREMIERCEM",
+        "RAKCERAMIC", "MONNOCERA", "FUWANGCER",
     ],
     "Insurance": [
         "DELTALIFE", "GREENDELT", "RELIANCINS", "PRAGATIINS", "PRAGATILIF",

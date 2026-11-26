@@ -27,7 +27,6 @@ import {
   isActiveSubscriptionPayload,
   isSessionActive,
   isUnregisteredPayload,
-  isWithinFreshGraceWindow,
   maskBdMobile,
   maskSubscriberId,
   normalizeSubscriptionStatus,
@@ -140,24 +139,13 @@ export function DashboardPage() {
         }
 
         if (isUnregisteredPayload(res)) {
-          // 5-Minute Fresh-Verification Grace Window
-          if (isWithinFreshGraceWindow(currentSession)) {
-            setRecheckNotice({
-              tone: 'info',
-              text: 'আপনার নতুন OTP ভেরিফিকেশনটি বিডিঅ্যাপস নেটওয়ার্কে সিঙ্ক হচ্ছে (৫ মিনিট গ্রেস পিরিয়ড)। এই সময়ে আপনার ড্যাশবোর্ড ও সকল AI টুল সম্পূর্ণ আনলক থাকবে।',
-            });
-            return;
-          }
-
-          // Outside 5-minute grace window and confirmed UNREGISTERED -> lock & bounce to /
+          // Confirmed UNREGISTERED by check_subscription.php -> release, wipe cookies/localStorage, bounce to /
           await releaseSubscriberSession(currentSession);
           purgeAllSubscriberState({
             forceClearLock: true,
             currentSessionToken: currentSession.sessionToken,
           });
-          setBdappsToast(
-            'আপনার Robi & Cirkle সাবস্ক্রিপশনটি বর্তমানে সক্রিয় নয়। পুনরায় অ্যাক্টিভেট করতে মোবাইল নম্বর দিয়ে OTP ভেরিফাই করুন।'
-          );
+          setBdappsToast(UNSUBSCRIBED_TOAST_BN);
           navigate('/', { replace: true });
           return;
         }
