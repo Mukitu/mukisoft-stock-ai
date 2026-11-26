@@ -1,0 +1,19 @@
+[
+  "sma_20",
+  "ema_20",
+  "rsi_14",
+  "macd",
+  "macd_signal",
+  "macd_diff",
+  "bb_high",
+  "bb_mid",
+  "bb_low",
+  "return_1d",
+  "return_3d",
+  "return_5d",
+  "vol_ratio",
+  "close_sma_ratio",
+  "close_ema_ratio",
+  "sma_ema_diff",
+  "bb_pos"
+]

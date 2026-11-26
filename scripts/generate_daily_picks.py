@@ -1,104 +1,85 @@
-import json, os, datetime as dt
-import pandas as pd
-import numpy as np
-import xgboost as xgb
-import joblib
-import requests
-from bs4 import BeautifulSoup
-from bdshare import get_current_trade_data
+"""
+MukiSoft AI — Daily 3:00 PM BST Strong Buy Picks Generator.
+Imports backend/quant_engine.py as the single source of truth.
+"""
 
-def get_bst_now():
-    return dt.datetime.utcnow() + dt.timedelta(hours=6)
+from __future__ import annotations
 
-def build_daily_picks():
-    model = xgb.XGBClassifier()
-    model.load_model("backend/dse_cse_stock_model.json")
-    feature_cols = joblib.load("backend/model_features.pkl")
+import datetime as dt
+import json
+import os
+import sys
+from pathlib import Path
 
+from bdshare import get_basic_historical_data, get_current_trade_data
+
+ROOT_DIR = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT_DIR / "backend"))
+
+from quant_engine import (  # noqa: E402
+    analyze_ohlcv_dataframe,
+    get_bst_now,
+    score_snapshot_batch,
+    select_genuine_top_picks,
+)
+
+OUTPUT_PATH = ROOT_DIR / "public" / "assets" / "daily_picks.json"
+
+
+def build_daily_picks() -> int:
     os.environ["BDSHARE_SOURCE"] = "new"
-    scored = []
-    try:
-        live_df = get_current_trade_data()
-        if live_df is not None and len(live_df) > 0:
-            live_df.columns = [c.lower() for c in live_df.columns]
-            sym_col = "symbol" if "symbol" in live_df.columns else live_df.columns[1]
-            for _, r in live_df.iterrows():
-                sym = str(r.get(sym_col, "")).strip().upper()
-                if not sym or len(sym) > 12 or sym.startswith("TB") or sym.endswith("BOND"):
-                    continue
-                c = float(str(r.get("ltp", r.get("close", 0))).replace(",", "") or 0)
-                if c < 12.0:
-                    continue
-                h = float(str(r.get("high", c)).replace(",", "") or c)
-                l = float(str(r.get("low", c)).replace(",", "") or c)
-                ycp = float(str(r.get("ycp", c)).replace(",", "") or c)
-                o = float(str(r.get("open", ycp)).replace(",", "") or ycp)
+    live_df = get_current_trade_data()
+    shortlist = score_snapshot_batch(live_df)
 
-                sma = (c + o + ycp) / 3.0
-                ema = (c * 0.25) + (sma * 0.75)
-                bb_high = max(h, sma * 1.04)
-                bb_low = min(l, sma * 0.96)
-                ret_1d = (c - ycp) / (ycp + 1e-9)
-                change_pct = round(ret_1d * 100.0, 2)
-                intraday_range_pct = ((max(h, c, o) - min(l, c, o)) / (ycp + 1e-9)) * 100.0
+    low_cands = [c for c in shortlist if 12.0 <= c["price"] < 100.0][:12]
+    high_cands = [c for c in shortlist if c["price"] >= 100.0][:12]
 
-                # Eliminate sideways/flat stocks
-                if change_pct < 0.25 or intraday_range_pct < 1.1:
-                    continue
+    end_date = dt.date.today()
+    start_date = end_date - dt.timedelta(days=100)
+    verified = []
 
-                est_rsi = min(68.0, max(42.0, 50.0 + (ret_1d * 400)))
-                row = pd.DataFrame([{
-                    "sma_20": sma, "ema_20": ema, "rsi_14": est_rsi,
-                    "macd": c - ema, "macd_signal": (c - ema) * 0.8, "macd_diff": (c - ema) * 0.2,
-                    "bb_high": bb_high, "bb_mid": sma, "bb_low": bb_low,
-                    "return_1d": ret_1d, "return_3d": ret_1d * 1.4, "return_5d": ret_1d * 1.8,
-                    "vol_ratio": 1.35, "close_sma_ratio": c / sma, "close_ema_ratio": c / ema,
-                    "sma_ema_diff": (ema - sma) / sma,
-                    "bb_pos": (c - bb_low) / (bb_high - bb_low + 1e-9)
-                }])[feature_cols]
-
-                pred_class = int(model.predict(row)[0])
-                if pred_class == 0:
-                    continue
-                probs = model.predict_proba(row)[0]
-                buy_prob = float(probs[2]) * 100 if len(probs) > 2 else float(np.max(probs)) * 100
-                conf = round(float(np.max(probs)) * 100, 2)
-
-                scored.append({
-                    "symbol": sym,
+    for cand in low_cands + high_cands:
+        try:
+            hist_df = get_basic_historical_data(str(start_date), str(end_date), cand["symbol"])
+            if hist_df is None or len(hist_df) < 20:
+                continue
+            full = analyze_ohlcv_dataframe(cand["symbol"], "DSE", hist_df.reset_index(), "Daily 3PM 90D Verified")
+            if full["signal_code"] == 2 and full["bull_votes"] >= 16 and not full["is_sideways"]:
+                verified.append({
+                    "symbol": full["symbol"],
                     "exchange": "DSE",
-                    "price": round(c, 2),
-                    "change_pct": change_pct,
-                    "signal_code": 2,
-                    "signal": "এখন কিনতে পারেন (Strong Buy)",
-                    "confidence": conf,
-                    "buy_score": round(buy_prob + change_pct * 3.0 + intraday_range_pct * 2.0, 2),
-                    "target_price": round(max(c * 1.055, bb_high), 2),
-                    "stop_loss": round(min(c * 0.96, bb_low), 2),
-                    "rsi": round(est_rsi, 1)
+                    "price": full["current_price"],
+                    "change_pct": full["change_pct"],
+                    "signal_code": full["signal_code"],
+                    "ml_signal_code": full["ml_signal_code"],
+                    "signal": full["signal"],
+                    "confidence": full["confidence"],
+                    "buy_score": round(full["confidence"] + full["bull_votes"], 2),
+                    "target_price": full["target_price"],
+                    "stop_loss": full["stop_loss"],
+                    "rsi": full["rsi"],
+                    "bull_votes": full["bull_votes"],
+                    "is_sideways": full["is_sideways"],
                 })
-    except Exception as e:
-        print("Live fetch warning:", e)
+        except Exception as exc:
+            print(f"Skipping {cand['symbol']}: {exc}")
 
-    low_three = sorted([x for x in scored if 12.0 <= x["price"] < 100], key=lambda x: (x["price"], -x["buy_score"]))[:3]
-    high_three = sorted(
-        sorted([x for x in scored if x["price"] >= 100], key=lambda x: x["buy_score"], reverse=True)[:3],
-        key=lambda x: x["price"]
-    )
-    picks = (low_three + high_three)[:6]
+    picks = select_genuine_top_picks(verified)
+    if not picks:
+        print("ERROR: No genuine Strong Buy picks verified today; preserving existing file.")
+        return 1
 
-    if len(picks) >= 4:
-        now_bst = get_bst_now()
-        payload = {
-            "generated_at_bst": now_bst.strftime("%d %b %Y, %I:%M %p"),
-            "cycle_date": now_bst.strftime("%Y-%m-%d"),
-            "picks": picks
-        }
-        with open("frontend/assets/daily_picks.json", "w", encoding="utf-8") as f:
-            json.dump(payload, f, ensure_ascii=False, indent=2)
-        print(f"Saved {len(picks)} Strong Buy picks to frontend/assets/daily_picks.json!")
-    else:
-        print("Insufficient market data today; preserving previous valid daily_picks.json.")
+    now_bst = get_bst_now()
+    payload = {
+        "generated_at_bst": now_bst.strftime("%d %b %Y, %I:%M %p"),
+        "cycle_date": now_bst.strftime("%Y-%m-%d"),
+        "picks": picks,
+    }
+    OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    OUTPUT_PATH.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"Saved {len(picks)} genuine Strong Buy picks to {OUTPUT_PATH}")
+    return 0
+
 
 if __name__ == "__main__":
-    build_daily_picks()
+    sys.exit(build_daily_picks())

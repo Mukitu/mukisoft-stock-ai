@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 48" fill="none">
+  <defs>
+    <linearGradient id="msGrad" x1="0" y1="0" x2="44" y2="44" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#0F172A" />
+      <stop offset="100%" stop-color="#1D4ED8" />
+    </linearGradient>
+    <linearGradient id="accentGrad" x1="12" y1="12" x2="32" y2="34" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#38BDF8" />
+      <stop offset="100%" stop-color="#10B981" />
+    </linearGradient>
+  </defs>
+  <rect x="2" y="2" width="44" height="44" rx="11" fill="url(#msGrad)" />
+  <rect x="11" y="21" width="3.5" height="14" rx="1.5" fill="#93C5FD" />
+  <rect x="17.5" y="14" width="3.5" height="21" rx="1.5" fill="url(#accentGrad)" />
+  <rect x="24" y="18" width="3.5" height="17" rx="1.5" fill="#FFFFFF" />
+  <rect x="30.5" y="11" width="3.5" height="24" rx="1.5" fill="#10B981" />
+  <path d="M11 23L19 16L25.5 20L33 11" stroke="#38BDF8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+  <text x="56" y="25" fill="#0F172A" font-family="Plus Jakarta Sans, system-ui, sans-serif" font-weight="800" font-size="19" letter-spacing="-0.03em">MukiSoft <tspan fill="#1D4ED8">AI</tspan></text>
+  <text x="57" y="38" fill="#64748B" font-family="Plus Jakarta Sans, system-ui, sans-serif" font-weight="600" font-size="9.2" letter-spacing="0.12em">DSE &amp; CSE QUANTITATIVE</text>
+</svg>

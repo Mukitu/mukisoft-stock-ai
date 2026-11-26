@@ -1,0 +1,508 @@
+import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useNavigate } from 'react-router-dom';
+import {
+  ArrowRight,
+  CheckCircle2,
+  Loader2,
+  RefreshCw,
+  ShieldCheck,
+  Smartphone,
+} from 'lucide-react';
+import {
+  ROBI_CIRKLE_DIGITS_REGEX,
+  VERIFY_REDIRECT_GRACE_MS,
+  buildActiveSessionFromResponse,
+  checkBdappsSubscription,
+  clearPendingOtp,
+  formatFullBdMobile,
+  getBdappsSession,
+  getPendingOtp,
+  isActiveSubscriptionPayload,
+  isSessionActive,
+  maskBdMobile,
+  requestBdappsOtp,
+  sanitizeBdLocalDigits,
+  saveBdappsSession,
+  savePendingOtp,
+  verifyBdappsOtp,
+} from '../../services/bdappsService';
+
+type CardStep = 'mobile' | 'otp' | 'verified';
+
+interface BdappsSubscriptionCardProps {
+  highlighted?: boolean;
+  unlockPrompt?: string | null;
+}
+
+export function BdappsSubscriptionCard({
+  highlighted = false,
+  unlockPrompt = null,
+}: BdappsSubscriptionCardProps) {
+  const navigate = useNavigate();
+
+  const [step, setStep] = useState<CardStep>('mobile');
+  const [localDigits, setLocalDigits] = useState('');
+  const [activeMobile, setActiveMobile] = useState('');
+  const [referenceNo, setReferenceNo] = useState('');
+  const [otpCode, setOtpCode] = useState('');
+  const [cooldown, setCooldown] = useState(0);
+
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isResending, setIsResending] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [statusMsg, setStatusMsg] = useState<string | null>(null);
+
+  const otpInputRef = useRef<HTMLInputElement | null>(null);
+  const redirectTimerRef = useRef<number | null>(null);
+
+  // Auto-redirect returning verified Robi & Cirkle subscribers directly to /dashboard
+  useEffect(() => {
+    const existing = getBdappsSession();
+    if (isSessionActive(existing)) {
+      navigate('/dashboard', { replace: true });
+      return;
+    }
+
+    // Restore pending OTP state if user is mid-verification within last 5 minutes
+    const pending = getPendingOtp();
+    if (pending && Date.now() - pending.sentAt < 5 * 60 * 1000) {
+      setActiveMobile(pending.mobile);
+      setLocalDigits(sanitizeBdLocalDigits(pending.mobile));
+      setReferenceNo(pending.referenceNo);
+      setStep('otp');
+    }
+  }, [navigate]);
+
+  // 30-second resend cooldown timer
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const id = window.setInterval(() => {
+      setCooldown((prev) => (prev <= 1 ? 0 : prev - 1));
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [cooldown]);
+
+  // Focus OTP input cleanly when swapping to Step 2
+  useEffect(() => {
+    if (step === 'otp') {
+      window.setTimeout(() => otpInputRef.current?.focus(), 60);
+    }
+  }, [step]);
+
+  useEffect(() => {
+    return () => {
+      if (redirectTimerRef.current !== null) {
+        window.clearTimeout(redirectTimerRef.current);
+      }
+    };
+  }, []);
+
+  const handleMobileSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    setErrorMsg(null);
+    setStatusMsg(null);
+
+    const cleaned = sanitizeBdLocalDigits(localDigits);
+    setLocalDigits(cleaned);
+
+    if (!ROBI_CIRKLE_DIGITS_REGEX.test(cleaned)) {
+      setErrorMsg('অনুগ্রহ করে সঠিক ১০ ডিজিটের Robi & Cirkle নম্বর দিন (শুরুতে ০ ছাড়া, যেমন 18XXXXXXXX বা 16XXXXXXXX)।');
+      return;
+    }
+
+    const fullMobile = formatFullBdMobile(cleaned);
+    setIsSubmitting(true);
+
+    try {
+      // 1. Proactive Pre-check: check_subscription.php before sending OTP
+      try {
+        const precheck = await checkBdappsSubscription(fullMobile);
+        if (isActiveSubscriptionPayload(precheck)) {
+          const session = buildActiveSessionFromResponse(fullMobile, precheck, 'check_subscription');
+          saveBdappsSession(session);
+          clearPendingOtp();
+          setStep('verified');
+          setStatusMsg('আপনার Robi & Cirkle নম্বরটি ইতিমধ্যেই সক্রিয় রয়েছে। ড্যাশবোর্ডে নিয়ে যাওয়া হচ্ছে...');
+          redirectTimerRef.current = window.setTimeout(() => {
+            navigate('/dashboard', { replace: true, state: { freshHandoff: true } });
+          }, 400);
+          return;
+        }
+      } catch {
+        // If pre-check transiently fails, continue cleanly to send_otp.php
+      }
+
+      // 2. Request OTP: send_otp.php
+      const otpRes = await requestBdappsOtp(fullMobile);
+
+      // Handle E1351 (already registered) or active subscription payload directly
+      if (
+        String(otpRes.statusCode || '').toUpperCase() === 'E1351' ||
+        isActiveSubscriptionPayload(otpRes)
+      ) {
+        const session = buildActiveSessionFromResponse(fullMobile, otpRes, 'send_otp');
+        saveBdappsSession(session);
+        clearPendingOtp();
+        setStep('verified');
+        setStatusMsg('আপনার Robi & Cirkle সাবস্ক্রিপশন সক্রিয় আছে! ড্যাশবোর্ডে প্রবেশ করা হচ্ছে...');
+        redirectTimerRef.current = window.setTimeout(() => {
+          navigate('/dashboard', { replace: true, state: { freshHandoff: true } });
+        }, 400);
+        return;
+      }
+
+      if (otpRes.success && otpRes.referenceNo) {
+        const ref = String(otpRes.referenceNo).trim();
+        setActiveMobile(fullMobile);
+        setReferenceNo(ref);
+        setOtpCode('');
+        setCooldown(30);
+        savePendingOtp({
+          referenceNo: ref,
+          mobile: fullMobile,
+          sentAt: Date.now(),
+        });
+        setStep('otp');
+        return;
+      }
+
+      setErrorMsg(
+        otpRes.message ||
+          otpRes.statusDetail ||
+          otpRes.error ||
+          'OTP পাঠানো সম্ভব হয়নি। অনুগ্রহ করে আপনার Robi & Cirkle নম্বরটি যাচাই করে আবার চেষ্টা করুন।'
+      );
+    } catch (err) {
+      setErrorMsg(
+        err instanceof Error
+          ? err.message
+          : 'OTP পাঠানোর সময় সমস্যা হয়েছে। অনুগ্রহ করে কিছুক্ষণ পর আবার চেষ্টা করুন।'
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleResendOtp = async () => {
+    if (cooldown > 0 || isResending || !activeMobile) return;
+    setErrorMsg(null);
+    setStatusMsg(null);
+    setIsResending(true);
+
+    try {
+      const otpRes = await requestBdappsOtp(activeMobile);
+
+      if (
+        String(otpRes.statusCode || '').toUpperCase() === 'E1351' ||
+        isActiveSubscriptionPayload(otpRes)
+      ) {
+        const session = buildActiveSessionFromResponse(activeMobile, otpRes, 'send_otp');
+        saveBdappsSession(session);
+        clearPendingOtp();
+        navigate('/dashboard', { replace: true, state: { freshHandoff: true } });
+        return;
+      }
+
+      if (otpRes.success && otpRes.referenceNo) {
+        const ref = String(otpRes.referenceNo).trim();
+        setReferenceNo(ref);
+        setCooldown(30);
+        savePendingOtp({
+          referenceNo: ref,
+          mobile: activeMobile,
+          sentAt: Date.now(),
+        });
+        setStatusMsg('নতুন ৬ ডিজিটের OTP কোড পাঠানো হয়েছে।');
+      } else {
+        setErrorMsg(
+          otpRes.message ||
+            otpRes.statusDetail ||
+            otpRes.error ||
+            'পুনরায় OTP পাঠানো যায়নি। অনুগ্রহ করে আবার চেষ্টা করুন।'
+        );
+      }
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : 'পুনরায় OTP পাঠাতে সমস্যা হয়েছে।');
+    } finally {
+      setIsResending(false);
+    }
+  };
+
+  const handleVerifyOtp = async (e: FormEvent) => {
+    e.preventDefault();
+    setErrorMsg(null);
+    setStatusMsg(null);
+
+    const cleanOtp = otpCode.replace(/\D/g, '').slice(0, 6);
+    setOtpCode(cleanOtp);
+
+    if (cleanOtp.length < 4) {
+      setErrorMsg('অনুগ্রহ করে এসএমএস-এ পাওয়া ৬ ডিজিটের OTP কোড সঠিকভাবে বসান।');
+      return;
+    }
+
+    if (!referenceNo) {
+      setErrorMsg('সেশন রেফারেন্স পাওয়া যায়নি। অনুগ্রহ করে নম্বর দিয়ে পুনরায় OTP চান।');
+      setStep('mobile');
+      return;
+    }
+
+    setIsSubmitting(true);
+
+    try {
+      // 3. Verify OTP: verify_otp.php with exact capital 'O' in Otp & referenceNo
+      const verifyRes = await verifyBdappsOtp(cleanOtp, referenceNo);
+
+      if (isActiveSubscriptionPayload(verifyRes)) {
+        const session = buildActiveSessionFromResponse(activeMobile, verifyRes, 'verify_otp');
+        // Save session synchronously BEFORE navigation
+        saveBdappsSession(session);
+        clearPendingOtp();
+        setStep('verified');
+        setStatusMsg('ভেরিফিকেশন সফল হয়েছে! আপনার প্রিমিয়াম ড্যাশবোর্ড আনলক করা হচ্ছে...');
+
+        // 700ms grace window before navigating to /dashboard
+        redirectTimerRef.current = window.setTimeout(() => {
+          navigate('/dashboard', { replace: true, state: { freshHandoff: true } });
+        }, VERIFY_REDIRECT_GRACE_MS);
+        return;
+      }
+
+      setErrorMsg(
+        verifyRes.message ||
+          verifyRes.statusDetail ||
+          verifyRes.error ||
+          'OTP কোডটি সঠিক নয় বা মেয়াদ শেষ হয়েছে। অনুগ্রহ করে আবার যাচাই করুন।'
+      );
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : 'OTP যাচাই করার সময় সমস্যা হয়েছে।');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleChangeNumber = () => {
+    clearPendingOtp();
+    setReferenceNo('');
+    setOtpCode('');
+    setErrorMsg(null);
+    setStatusMsg(null);
+    setCooldown(0);
+    setStep('mobile');
+  };
+
+  return (
+    <div
+      id="bdapps-subscription-card"
+      className={`w-full min-w-0 max-w-full bg-slate-50 border rounded-2xl p-4 sm:p-6 flex flex-col justify-between h-full shadow-xs transition-all duration-300 ${
+        highlighted
+          ? 'border-blue-600 ring-4 ring-blue-600/20'
+          : 'border-slate-200'
+      }`}
+    >
+      {/* Always-Visible Official BDApps Pricing Header */}
+      <div className="space-y-2.5 sm:space-y-3 pb-4 sm:pb-5 border-b border-slate-200 min-w-0">
+        <div className="inline-flex items-center text-[11px] font-semibold text-blue-800 bg-blue-50 border border-blue-200/80 px-2.5 py-1 rounded-md max-w-full leading-snug">
+          <span>🇧🇩 অফিসিয়াল বিডিঅ্যাপস সাবস্ক্রিপশন • কোনো পাসওয়ার্ড লাগবে না</span>
+        </div>
+
+        <div className="space-y-1">
+          <h2 className="text-lg sm:text-2xl font-extrabold text-slate-900 tracking-tight leading-snug">
+            ৳২.৭৮ টাকা /দিন{' '}
+            <span className="text-xs sm:text-sm font-semibold text-slate-600 inline-block">
+              (ভ্যাট + এসডি + এসসি সহ)
+            </span>
+          </h2>
+          <p className="text-xs sm:text-[13px] text-slate-600 leading-relaxed">
+            আপনার Robi &amp; Cirkle মোবাইল নম্বর দিন, OTP আসবে সেই নম্বরে। ভেরিফাই ও অ্যাক্টিভেট করলেই আপনার ড্যাশবোর্ড ও সকল প্রিমিয়াম AI সিগন্যাল আনলক হয়ে যাবে।
+          </p>
+        </div>
+
+        {unlockPrompt && (
+          <div className="rounded-lg bg-blue-50 border border-blue-200 px-3 py-2 text-xs font-semibold text-blue-900 leading-relaxed">
+            {unlockPrompt}
+          </div>
+        )}
+      </div>
+
+      {/* Interactive Card Body: Step 1 -> Step 2 -> Verified */}
+      <div className="py-4 sm:py-5 flex-1 flex flex-col justify-center min-w-0">
+        {step === 'mobile' && (
+          <form onSubmit={handleMobileSubmit} className="space-y-3.5 sm:space-y-4 w-full min-w-0" noValidate>
+            <div className="space-y-1.5 min-w-0">
+              <label
+                htmlFor="bdapps-mobile-input"
+                className="flex items-center gap-1.5 text-sm font-bold text-slate-800"
+              >
+                <Smartphone className="w-4 h-4 text-blue-700 shrink-0" />
+                <span>আপনার Robi &amp; Cirkle নম্বর দিন</span>
+              </label>
+
+              <div className="flex items-stretch w-full min-w-0 rounded-xl border border-slate-300 bg-white overflow-hidden focus-within:border-blue-700 focus-within:ring-2 focus-within:ring-blue-700/15 transition">
+                <span className="inline-flex items-center px-3 sm:px-3.5 bg-slate-100 border-r border-slate-200 text-sm font-bold text-slate-700 font-mono-num select-none shrink-0">
+                  +880
+                </span>
+                <input
+                  id="bdapps-mobile-input"
+                  type="tel"
+                  inputMode="numeric"
+                  autoComplete="tel-national"
+                  maxLength={14}
+                  value={localDigits}
+                  onChange={(e) => {
+                    setLocalDigits(sanitizeBdLocalDigits(e.target.value));
+                    if (errorMsg) setErrorMsg(null);
+                  }}
+                  placeholder="Robi & Cirkle নম্বর লিখুন"
+                  className="flex-1 min-w-0 w-full px-3 sm:px-3.5 py-3 text-sm font-semibold text-slate-900 placeholder:text-slate-400 placeholder:font-normal outline-none font-mono-num"
+                />
+              </div>
+
+              <p className="text-[11px] text-slate-500 leading-relaxed">
+                Robi &amp; Cirkle এর ১০ ডিজিটের নম্বর দিন (শুরুতে ০ ছাড়া)। যেমন ১৮XXXXXXXX বা ১৬XXXXXXXX
+              </p>
+            </div>
+
+            {errorMsg && (
+              <div
+                role="alert"
+                className="rounded-lg border border-rose-200 bg-rose-50 px-3.5 py-2.5 text-xs font-medium text-rose-700 leading-relaxed"
+              >
+                {errorMsg}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className="w-full inline-flex items-center justify-center gap-2 bg-blue-700 hover:bg-blue-800 disabled:opacity-65 text-white font-bold text-sm px-5 py-3.5 rounded-xl transition-colors cursor-pointer"
+            >
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>যাচাই ও OTP পাঠানো হচ্ছে...</span>
+                </>
+              ) : (
+                <>
+                  <span>OTP চান</span>
+                  <ArrowRight className="w-4 h-4" />
+                </>
+              )}
+            </button>
+          </form>
+        )}
+
+        {step === 'otp' && (
+          <form onSubmit={handleVerifyOtp} className="space-y-4 w-full min-w-0" noValidate>
+            <div className="space-y-1">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="text-base font-bold text-slate-900">৬ ডিজিটের কোড বসান</h3>
+                <button
+                  type="button"
+                  onClick={handleResendOtp}
+                  disabled={cooldown > 0 || isResending}
+                  className="inline-flex items-center gap-1 text-xs font-semibold text-blue-700 hover:text-blue-800 disabled:text-slate-400 disabled:cursor-not-allowed cursor-pointer"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isResending ? 'animate-spin' : ''}`} />
+                  <span>{cooldown > 0 ? `আবার পাঠান (${cooldown}s)` : 'আবার পাঠান'}</span>
+                </button>
+              </div>
+              <p className="text-xs text-slate-600">
+                পাঠানো হয়েছে{' '}
+                <strong className="font-mono-num text-slate-900">
+                  {maskBdMobile(activeMobile)}
+                </strong>{' '}
+                নম্বরে
+              </p>
+            </div>
+
+            <div>
+              <label htmlFor="bdapps-otp-input" className="sr-only">
+                ৬ ডিজিটের কোড বসান
+              </label>
+              <input
+                ref={otpInputRef}
+                id="bdapps-otp-input"
+                type="text"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                maxLength={6}
+                value={otpCode}
+                onChange={(e) => {
+                  setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6));
+                  if (errorMsg) setErrorMsg(null);
+                }}
+                placeholder="------"
+                className="w-full min-w-0 bg-white border border-slate-300 focus:border-blue-700 focus:ring-2 focus:ring-blue-700/15 rounded-xl px-3 sm:px-4 py-3 text-center text-xl sm:text-2xl font-bold tracking-[0.35em] sm:tracking-[0.5em] text-slate-900 font-mono-num outline-none"
+              />
+            </div>
+
+            {statusMsg && (
+              <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3.5 py-2 text-xs font-medium text-emerald-800">
+                {statusMsg}
+              </div>
+            )}
+
+            {errorMsg && (
+              <div
+                role="alert"
+                className="rounded-lg border border-rose-200 bg-rose-50 px-3.5 py-2.5 text-xs font-medium text-rose-700 leading-relaxed"
+              >
+                {errorMsg}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={isSubmitting || otpCode.length < 4}
+              className="w-full inline-flex items-center justify-center gap-2 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-60 text-white font-bold text-sm px-5 py-3.5 rounded-xl transition-colors cursor-pointer"
+            >
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>ভেরিফাই করা হচ্ছে...</span>
+                </>
+              ) : (
+                <>
+                  <ShieldCheck className="w-4 h-4" />
+                  <span>ভেরিফাই ও অ্যাক্টিভেট →</span>
+                </>
+              )}
+            </button>
+
+            <div className="text-center">
+              <button
+                type="button"
+                onClick={handleChangeNumber}
+                className="text-xs font-semibold text-slate-500 hover:text-slate-800 underline underline-offset-2 cursor-pointer"
+              >
+                নম্বর পরিবর্তন করুন
+              </button>
+            </div>
+          </form>
+        )}
+
+        {step === 'verified' && (
+          <div className="py-5 text-center space-y-3">
+            <div className="w-12 h-12 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center mx-auto">
+              <CheckCircle2 className="w-7 h-7" />
+            </div>
+            <div className="text-base font-bold text-slate-900">সাবস্ক্রিপশন ভেরিফাই সম্পন্ন!</div>
+            <p className="text-xs text-slate-600 leading-relaxed">
+              {statusMsg || 'আপনার প্রিমিয়াম ড্যাশবোর্ড আনলক করা হচ্ছে...'}
+            </p>
+            <div className="inline-flex items-center gap-1.5 text-xs font-semibold text-blue-700">
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              <span>ড্যাশবোর্ড লোড হচ্ছে...</span>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Footer Note inside Card */}
+      <div className="pt-3.5 sm:pt-4 border-t border-slate-200 text-[11px] text-slate-500 leading-relaxed">
+        🔒 Robi &amp; Cirkle (বিডিঅ্যাপস) • যেকোনো সময় ড্যাশবোর্ড থেকে এক ক্লিকে বাতিল করুন
+      </div>
+    </div>
+  );
+}
