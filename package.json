@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0 --port 3000",
     "start": "vite preview --host 0.0.0.0 --port 3000",
-    "build": "vite build",
+    "build": "vite build && rm -rf frontend/dist && mkdir -p frontend && cp -r dist frontend/dist",
     "lint": "tsc --noEmit"
   },
   "dependencies": {
