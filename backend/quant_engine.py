@@ -112,7 +112,7 @@ def compute_timeseries_indicators(df: pd.DataFrame) -> pd.DataFrame:
 
     data = data[data["close"] > 0].copy()
     if "date" in data.columns:
-        data = data.sort_values("date").reset_index(drop=True)
+        data = data.sort_values("date").drop_duplicates(subset=["date"], keep="last").reset_index(drop=True)
 
     close = data["close"].astype(float)
     volume = (

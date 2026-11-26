@@ -72,12 +72,14 @@ export function useTopPicks() {
   useEffect(() => {
     let active = true;
     void fetchLiveTopPicksFromApi(20_000).then((liveResult) => {
-      if (active && liveResult && liveResult.picks.length >= 6) {
-        queryClient.setQueryData(queryKey, liveResult);
-      } else if (active && liveResult && liveResult.picks.length > 0) {
-        const existing = queryClient.getQueryData<{ picks?: unknown[] }>(queryKey);
-        if (!existing?.picks || existing.picks.length === 0) {
+      if (active && liveResult && liveResult.picks.length > 0) {
+        if (session.is_live || liveResult.picks.length >= 6) {
           queryClient.setQueryData(queryKey, liveResult);
+        } else {
+          const existing = queryClient.getQueryData<{ picks?: unknown[] }>(queryKey);
+          if (!existing?.picks || existing.picks.length === 0) {
+            queryClient.setQueryData(queryKey, liveResult);
+          }
         }
       }
     });

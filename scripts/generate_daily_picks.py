@@ -79,10 +79,8 @@ HTTP_HEADERS = {
     "Referer": "https://www.dsebd.org/",
 }
 
-# Core liquid DSE/CSE catalog symbols + top picks always included in the post-market ML cache
+# Core liquid DSE/CSE catalog symbols always included in the post-market ML cache
 CORE_CACHE_SYMBOLS: list[str] = [
-    # Top Strong Bullish Setup Picks
-    "DESHBANDHU", "ADVENT", "SHARPIND", "DULAMIACOT", "ZEALBANGLA", "BDAUTOCA",
     # Telecommunication
     "GP", "ROBI", "BSCCL",
     # Pharmaceuticals & Chemicals
@@ -464,14 +462,17 @@ def _analyze_single_symbol(
         hist_df = None
 
     if hist_df is not None and quote and quote["close"] > 0:
-        # Ensure latest closing board bar is reflected on top of 90D OHLCV
+        # Sort ascending and deduplicate by date first (bdshare returns newest-first)
         cols_lower = {str(c).lower().strip(): c for c in hist_df.columns}
         date_col = cols_lower.get("date") or cols_lower.get("trading date") or cols_lower.get("trade_date")
         close_col = cols_lower.get("close") or cols_lower.get("closep")
         if date_col and close_col and len(hist_df) > 0:
-            last_date = str(hist_df.iloc[-1][date_col])[:10]
-            if trading_date > last_date and abs(float(hist_df.iloc[-1][close_col]) - quote["close"]) > 1e-6:
-                new_row = {col: hist_df.iloc[-1][col] for col in hist_df.columns}
+            hist_df = hist_df.copy()
+            hist_df["_norm_date"] = pd.to_datetime(hist_df[date_col], errors="coerce").dt.strftime("%Y-%m-%d")
+            hist_df = hist_df.dropna(subset=["_norm_date"]).sort_values("_norm_date").drop_duplicates(subset=["_norm_date"], keep="last").reset_index(drop=True)
+            last_date = str(hist_df.iloc[-1]["_norm_date"])[:10] if len(hist_df) > 0 else ""
+            if trading_date > last_date and len(hist_df) > 0:
+                new_row = {col: hist_df.iloc[-1][col] for col in hist_df.columns if col != "_norm_date"}
                 new_row[date_col] = trading_date
                 if cols_lower.get("open"):
                     new_row[cols_lower["open"]] = quote["open"]
@@ -482,7 +483,22 @@ def _analyze_single_symbol(
                 new_row[close_col] = quote["close"]
                 if cols_lower.get("volume") and quote["volume"] > 0:
                     new_row[cols_lower["volume"]] = quote["volume"]
+                hist_df = hist_df.drop(columns=["_norm_date"])
                 hist_df = pd.concat([hist_df, pd.DataFrame([new_row])], ignore_index=True)
+            else:
+                if trading_date == last_date and len(hist_df) > 0:
+                    idx_last = hist_df.index[-1]
+                    if cols_lower.get("open") and quote["open"] > 0:
+                        hist_df.loc[idx_last, cols_lower["open"]] = quote["open"]
+                    if cols_lower.get("high") and quote["high"] > 0:
+                        hist_df.loc[idx_last, cols_lower["high"]] = max(float(hist_df.loc[idx_last, cols_lower["high"]] or 0), quote["high"])
+                    if cols_lower.get("low") and quote["low"] > 0:
+                        cur_low = float(hist_df.loc[idx_last, cols_lower["low"]] or quote["low"])
+                        hist_df.loc[idx_last, cols_lower["low"]] = min(cur_low, quote["low"]) if cur_low > 0 else quote["low"]
+                    hist_df.loc[idx_last, close_col] = quote["close"]
+                    if cols_lower.get("volume") and quote["volume"] > 0:
+                        hist_df.loc[idx_last, cols_lower["volume"]] = quote["volume"]
+                hist_df = hist_df.drop(columns=["_norm_date"])
 
     if hist_df is None:
         if not quote or quote["close"] <= 0:
@@ -580,7 +596,6 @@ def build_post_market_snapshots() -> int:
     shortlist = rank_active_market_candidates(live_df) if live_df is not None else []
     low_cands = [c["symbol"] for c in shortlist if MIN_STRONG_BUY_PRICE <= c["price"] < 100.0][:30]
     high_cands = [c["symbol"] for c in shortlist if c["price"] >= 100.0][:30]
-    screening_set = set(low_cands + high_cands)
 
     target_symbols: list[str] = []
     seen_targets: set[str] = set()
@@ -618,7 +633,6 @@ def build_post_market_snapshots() -> int:
 
             if (
                 has_90d
-                and sym in screening_set
                 and full["signal_code"] == 2
                 and full["ml_signal_code"] == 2
                 and full["bull_votes"] >= MIN_STRONG_BUY_VOTES
@@ -684,22 +698,13 @@ def build_post_market_snapshots() -> int:
 
     picks = select_genuine_top_picks(verified_strong_buys)
 
-    # Preserve existing verified closing picks if upstream board had an outage and yielded < 6 picks
-    if len(picks) < 6 and DAILY_PICKS_PATH.exists():
+    # Only preserve previous snapshot if the exchange scan suffered a complete outage (0 analyses)
+    if not picks and not analyses_cache and DAILY_PICKS_PATH.exists():
         try:
             existing = json.loads(DAILY_PICKS_PATH.read_text(encoding="utf-8"))
             existing_picks = existing.get("picks") if isinstance(existing, dict) else None
             if isinstance(existing_picks, list) and existing_picks:
-                seen_pick_syms = {str(p.get("symbol", "")).strip().upper() for p in picks}
-                for prev_p in existing_picks:
-                    if not isinstance(prev_p, dict):
-                        continue
-                    prev_sym = str(prev_p.get("symbol", "")).strip().upper()
-                    if prev_sym and prev_sym not in seen_pick_syms:
-                        picks.append(prev_p)
-                        seen_pick_syms.add(prev_sym)
-                    if len(picks) >= 6:
-                        break
+                picks = [p for p in existing_picks if isinstance(p, dict)][:6]
         except Exception:
             pass
 
@@ -894,26 +899,7 @@ def build_remote_render_ml_snapshots() -> int:
         except Exception:
             pass
 
-    # Merge with existing verified closing picks so Buy Radar retains full 6 setups if live scan returned < 6
-    if len(picks) < 6 and DAILY_PICKS_PATH.exists():
-        try:
-            existing = json.loads(DAILY_PICKS_PATH.read_text(encoding="utf-8"))
-            existing_picks = existing.get("picks") if isinstance(existing, dict) else None
-            if isinstance(existing_picks, list) and existing_picks:
-                seen_pick_syms = {str(p.get("symbol", "")).strip().upper() for p in picks}
-                for prev_p in existing_picks:
-                    if not isinstance(prev_p, dict):
-                        continue
-                    prev_sym = str(prev_p.get("symbol", "")).strip().upper()
-                    if prev_sym and prev_sym not in seen_pick_syms:
-                        picks.append(prev_p)
-                        seen_pick_syms.add(prev_sym)
-                    if len(picks) >= 6:
-                        break
-        except Exception:
-            pass
-
-    # 3. Sync real ML analyses for ALL DSE & CSE board symbols (no cap)
+    # Sync real ML analyses for ALL DSE & CSE board symbols (no cap)
     dse_board_syms: list[str] = []
     if html:
         unesc = html.replace('\\"', '"')
@@ -946,6 +932,16 @@ def build_remote_render_ml_snapshots() -> int:
             if payload:
                 analyses_cache[f"DSE:{sym}"] = payload
                 analyses_cache[f"CSE:{sym}"] = {**payload, "exchange": "CSE"}
+
+    # Only preserve previous snapshot if both /api/top-picks and full market scan failed
+    if not picks and not analyses_cache and DAILY_PICKS_PATH.exists():
+        try:
+            existing = json.loads(DAILY_PICKS_PATH.read_text(encoding="utf-8"))
+            existing_picks = existing.get("picks") if isinstance(existing, dict) else None
+            if isinstance(existing_picks, list) and existing_picks:
+                picks = [p for p in existing_picks if isinstance(p, dict)][:6]
+        except Exception:
+            pass
 
     market_snapshot = {
         "schema_version": 2,

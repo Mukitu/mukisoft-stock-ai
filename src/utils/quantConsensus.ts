@@ -224,7 +224,7 @@ export function normalizeStockAnalysis(raw: Partial<StockAnalysis>, fallbackExch
   }
 
   // Fallback computation when connecting to older API responses or snapshot data
-  const closes = history.length ? history.map((h) => h.close) : [price > 0 ? price : 100];
+  const closes = history.length ? history.map((h) => h.close) : [price > 0 ? price : 0];
   const n = closes.length;
   const effectivePrice = price > 0 ? price : closes[n - 1];
   const recent20 = closes.slice(-20);
@@ -369,7 +369,7 @@ export function normalizeStockAnalysis(raw: Partial<StockAnalysis>, fallbackExch
     action_type: actionType,
     ml_signal: mlSignalCode === 2 ? 'Strong Buy' : mlSignalCode === 0 ? 'High Risk / Sell' : 'Hold / Wait',
     ml_signal_code: mlSignalCode,
-    confidence: Number((raw.confidence ?? 98.2).toFixed(2)),
+    confidence: Number((raw.confidence ?? 0).toFixed(2)),
     rsi: indicators.rsi14,
     target_price: targetPrice,
     stop_loss: stopLoss,
@@ -396,8 +396,8 @@ export function buildStructuredBanglaReport(analysis: StockAnalysis): Structured
   const { s1, s2, r1, r2 } = analysis.support_resistance;
   const { sma20, rsi14, channel_range_pct: rangePct } = analysis.indicators;
 
-  const gainPct = price > 0 ? (((r1 - price) / price) * 100).toFixed(1) : '4.5';
-  const riskPct = price > 0 ? (((price - s1) / price) * 100).toFixed(1) : '3.5';
+  const gainPct = price > 0 ? (((r1 - price) / price) * 100).toFixed(1) : '0.0';
+  const riskPct = price > 0 ? (((price - s1) / price) * 100).toFixed(1) : '0.0';
 
   const last5 = analysis.chart_history.slice(-5);
   const recentHigh = last5.length ? Math.max(...last5.map((d) => d.high), price) : price;
