@@ -19,13 +19,15 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Literal
+from urllib.parse import urlparse
 
 import httpx
 import pandas as pd
 from bdshare import get_basic_historical_data, get_current_trade_data, get_market_info
 from bs4 import BeautifulSoup
-from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, model_validator
 from pypdf import PdfReader
 
@@ -41,6 +43,12 @@ from quant_engine import (
     rank_active_market_candidates,
     select_genuine_top_picks,
 )
+from quota_store import (
+    FREE_QUOTA_LIMIT,
+    check_and_consume_quota,
+    extract_client_ip,
+    get_quota_status,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("mukisoft.api")
@@ -50,6 +58,9 @@ os.environ.setdefault("BDSHARE_SOURCE", "new")
 BASE_DIR = Path(__file__).resolve().parent
 DAILY_CACHE_FILE = BASE_DIR / "daily_picks_cache.json"
 AI_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
+BDAPPS_API_BASE = os.getenv("BDAPPS_API_BASE", "https://skillproof.top/stock").strip().rstrip("/")
+ALLOWED_BDAPPS_HOSTS = {"skillproof.top", "www.skillproof.top"}
+BD_MOBILE_REGEX = re.compile(r"^\+?8801[3-9][0-9]{8}$")
 
 SYMBOL_REGEX = re.compile(r"^[A-Z0-9&().-]{1,20}$")
 MAX_UPLOAD_FILES = 5
@@ -109,6 +120,7 @@ SECTOR_CATALOG: dict[str, list[str]] = {
 # In-memory TTL cache for market & analysis endpoints
 _TTL_CACHE: dict[str, tuple[float, Any]] = {}
 _DAILY_PICKS_MEMORY: dict[str, Any] = {"date_key": "", "data": None}
+_TOP_PICKS_LOCK: asyncio.Lock | None = None
 _http_client: httpx.AsyncClient | None = None
 
 
@@ -185,6 +197,117 @@ class ContactMessageInput(BaseModel):
     name: str = Field(..., min_length=2, max_length=120)
     email: str = Field(..., min_length=5, max_length=160)
     message: str = Field(..., min_length=10, max_length=3000)
+
+
+class FreeQuotaRequest(BaseModel):
+    deviceHash: str = Field(default="", max_length=128)
+    symbol: str | None = Field(default=None, max_length=20)
+    action: Literal["status", "consume"] = "status"
+    subscriberId: str | None = Field(default=None, max_length=64)
+    mobile: str | None = Field(default=None, max_length=24)
+
+
+def _normalize_bd_mobile(raw_mobile: str | None, raw_subscriber_id: str | None) -> str | None:
+    candidates = [raw_mobile or "", raw_subscriber_id or ""]
+    for cand in candidates:
+        cleaned = cand.strip()
+        if cleaned.lower().startswith("tel:"):
+            cleaned = cleaned[4:]
+        digits = re.sub(r"\D", "", cleaned)
+        if digits.startswith("01") and len(digits) == 11:
+            digits = "88" + digits
+        elif digits.startswith("1") and len(digits) == 10:
+            digits = "880" + digits
+        candidate_e164 = f"+{digits}" if digits else ""
+        if BD_MOBILE_REGEX.match(candidate_e164):
+            return candidate_e164
+    return None
+
+
+async def verify_bdapps_subscriber(
+    subscriber_id: str | None,
+    mobile: str | None,
+) -> bool:
+    """
+    Verifies a claimed BDApps Robi & Cirkle subscriber server-side against
+    check_subscription.php (allowlisted HTTPS host) so spoofed headers cannot bypass quota.
+    """
+    normalized_mobile = _normalize_bd_mobile(mobile, subscriber_id)
+    if not normalized_mobile:
+        return False
+
+    cache_key = f"bdapps_sub:{normalized_mobile}"
+    cached = cache_get(cache_key)
+    if cached is not None:
+        return bool(cached)
+
+    parsed_base = urlparse(BDAPPS_API_BASE)
+    if parsed_base.scheme != "https" or (parsed_base.hostname or "").lower() not in ALLOWED_BDAPPS_HOSTS:
+        logger.warning("Blocked unallowlisted BDAPPS_API_BASE host: %s", BDAPPS_API_BASE)
+        return False
+
+    if _http_client is None:
+        return False
+
+    try:
+        resp = await _http_client.post(
+            f"{BDAPPS_API_BASE}/check_subscription.php",
+            data={"user_mobile": normalized_mobile},
+            headers={"Accept": "application/json, text/plain, */*"},
+            timeout=5.0,
+        )
+        if resp.status_code == 200:
+            payload = resp.json()
+            status = str(payload.get("subscriptionStatus", "")).strip().upper()
+            code = str(payload.get("statusCode", "")).strip().upper()
+            is_active = bool(
+                payload.get("isSubscribed") is True
+                or status in {"REGISTERED", "INITIAL CHARGING PENDING"}
+                or code == "E1351"
+            )
+            cache_set(cache_key, is_active, ttl_seconds=300 if is_active else 30)
+            return is_active
+    except Exception as exc:
+        logger.warning("BDApps subscriber verification skipped due to network error: %s", exc)
+    return False
+
+
+def _subscribed_quota_payload() -> dict[str, Any]:
+    return {
+        "allowed": True,
+        "isSubscribed": True,
+        "unlimited": True,
+        "limit": FREE_QUOTA_LIMIT,
+        "windowStart": 0,
+        "symbols": [],
+        "remaining": FREE_QUOTA_LIMIT,
+        "resetInSeconds": 0,
+    }
+
+
+async def _enforce_analysis_quota(
+    request: Request,
+    symbol: str,
+) -> tuple[dict[str, Any], JSONResponse | None]:
+    subscriber_id = request.headers.get("x-subscriber-id") or request.query_params.get("subscriberId")
+    mobile = request.headers.get("x-subscriber-mobile") or request.query_params.get("mobile")
+
+    if await verify_bdapps_subscriber(subscriber_id, mobile):
+        return _subscribed_quota_payload(), None
+
+    client_ip = extract_client_ip(request.headers, request.client.host if request.client else None)
+    device_hash = request.headers.get("x-device-hash") or request.query_params.get("deviceHash") or ""
+    quota_state = check_and_consume_quota(client_ip, device_hash, symbol)
+
+    if not quota_state["allowed"]:
+        return quota_state, JSONResponse(
+            status_code=429,
+            content={
+                **quota_state,
+                "detail": "আজকের ২টি ফ্রি বিশ্লেষণ শেষ হয়েছে! আনলিমিটেড অ্যাক্সেসের জন্য Robi & Cirkle নম্বর দিয়ে সাবস্ক্রাইব করুন।",
+            },
+        )
+    return quota_state, None
 
 
 async def call_groq_chat(messages: list[dict[str, Any]], max_tokens: int = 260, temperature: float = 0.4) -> str:
@@ -337,29 +460,20 @@ async def fetch_and_analyze_stock(symbol: str, exchange: str) -> dict[str, Any] 
     return result
 
 
-async def compute_daily_top_picks(force_refresh: bool = False) -> dict[str, Any]:
-    session = get_bd_market_session()
-    cycle_key = get_market_cycle_key()
-
-    if not force_refresh and not session["is_live"]:
-        cached = load_persistent_picks(cycle_key)
-        if cached:
-            out = dict(cached)
-            out["session"] = session
-            return out
-
-    live_df = await asyncio.to_thread(_fetch_bdshare_board_sync)
-    shortlist = rank_active_market_candidates(live_df) if live_df is not None else []
-
-    verified: list[dict[str, Any]] = []
-    # Verify top active positive-momentum liquid candidates with genuine 90-day history & 20-indicator consensus
-    low_cands = [c for c in shortlist if MIN_STRONG_BUY_PRICE <= c["price"] < 100.0][:20]
-    high_cands = [c for c in shortlist if c["price"] >= 100.0][:20]
-
-    for cand in low_cands + high_cands:
-        hist_df = await asyncio.to_thread(_fetch_bdshare_history_sync, cand["symbol"])
+async def _verify_candidate_90d(
+    cand: dict[str, Any],
+    sem: asyncio.Semaphore,
+) -> dict[str, Any] | None:
+    async with sem:
+        try:
+            hist_df = await asyncio.wait_for(
+                asyncio.to_thread(_fetch_bdshare_history_sync, cand["symbol"]),
+                timeout=8.0,
+            )
+        except Exception:
+            return None
         if hist_df is None:
-            continue
+            return None
         full = analyze_ohlcv_dataframe(cand["symbol"], "DSE", hist_df, "90D Real-Time Verified Strong Buy")
         if (
             full["signal_code"] == 2
@@ -370,7 +484,7 @@ async def compute_daily_top_picks(force_refresh: bool = False) -> dict[str, Any]
             and full["change_pct"] > 0.0
             and full["volume"] > 0
         ):
-            verified.append({
+            return {
                 "symbol": full["symbol"],
                 "exchange": "DSE",
                 "price": full["current_price"],
@@ -388,19 +502,72 @@ async def compute_daily_top_picks(force_refresh: bool = False) -> dict[str, Any]
                 "bull_votes": full["bull_votes"],
                 "total_votes": full["total_votes"],
                 "is_sideways": full["is_sideways"],
-            })
+            }
+        return None
 
-    picks = select_genuine_top_picks(verified)
-    payload = {
-        "schema_version": 2,
-        "generated_at_bst": get_bst_now().strftime("%d %b %Y, %I:%M %p"),
-        "cycle_key": cycle_key,
-        "session": session,
-        "picks": picks,
-    }
-    if live_df is not None:
-        save_persistent_picks(cycle_key, payload)
-    return payload
+
+async def compute_daily_top_picks(force_refresh: bool = False) -> dict[str, Any]:
+    global _TOP_PICKS_LOCK
+    if _TOP_PICKS_LOCK is None:
+        _TOP_PICKS_LOCK = asyncio.Lock()
+
+    session = get_bd_market_session()
+    cycle_key = get_market_cycle_key()
+
+    if not force_refresh:
+        live_cached = cache_get("top_picks_live")
+        if session["is_live"] and live_cached:
+            out = dict(live_cached)
+            out["session"] = session
+            return out
+        if not session["is_live"]:
+            cached = load_persistent_picks(cycle_key)
+            if cached:
+                out = dict(cached)
+                out["session"] = session
+                return out
+
+    async with _TOP_PICKS_LOCK:
+        # Re-check cache after acquiring lock so concurrent requests reuse fresh scan
+        if not force_refresh:
+            live_cached = cache_get("top_picks_live")
+            if session["is_live"] and live_cached:
+                out = dict(live_cached)
+                out["session"] = session
+                return out
+            if not session["is_live"]:
+                cached = load_persistent_picks(cycle_key)
+                if cached:
+                    out = dict(cached)
+                    out["session"] = session
+                    return out
+
+        live_df = await asyncio.to_thread(_fetch_bdshare_board_sync)
+        shortlist = rank_active_market_candidates(live_df) if live_df is not None else []
+
+        # Concurrently verify top active liquid candidates with genuine 90D history & 20-indicator consensus
+        low_cands = [c for c in shortlist if MIN_STRONG_BUY_PRICE <= c["price"] < 100.0][:16]
+        high_cands = [c for c in shortlist if c["price"] >= 100.0][:16]
+        sem = asyncio.Semaphore(8)
+
+        results = await asyncio.gather(
+            *(_verify_candidate_90d(cand, sem) for cand in (low_cands + high_cands)),
+            return_exceptions=True,
+        )
+        verified = [r for r in results if isinstance(r, dict)]
+
+        picks = select_genuine_top_picks(verified)
+        payload = {
+            "schema_version": 2,
+            "generated_at_bst": get_bst_now().strftime("%d %b %Y, %I:%M %p"),
+            "cycle_key": cycle_key,
+            "session": session,
+            "picks": picks,
+        }
+        if live_df is not None:
+            cache_set("top_picks_live", payload, ttl_seconds=120)
+            save_persistent_picks(cycle_key, payload)
+        return payload
 
 
 @asynccontextmanager
@@ -430,7 +597,10 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(title="MukiSoft AI Quantitative Stock Engine (DSE & CSE)", lifespan=lifespan)
 
-raw_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:5173")
+raw_origins = os.getenv(
+    "ALLOWED_ORIGINS",
+    "https://stock.mukisoft.tech,http://localhost:3000,http://localhost:5173",
+)
 allowed_origins = [origin.strip() for origin in raw_origins.split(",") if origin.strip()]
 
 app.add_middleware(
@@ -438,7 +608,14 @@ app.add_middleware(
     allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "Accept"],
+    allow_headers=[
+        "Authorization",
+        "Content-Type",
+        "Accept",
+        "X-Device-Hash",
+        "X-Subscriber-Id",
+        "X-Subscriber-Mobile",
+    ],
 )
 
 
@@ -489,15 +666,50 @@ async def get_dynamic_top_picks() -> dict[str, Any]:
     return await compute_daily_top_picks(force_refresh=False)
 
 
+@app.post("/api/free-quota")
+async def free_quota_check(
+    request: Request,
+    payload: FreeQuotaRequest,
+):
+    subscriber_id = payload.subscriberId or request.headers.get("x-subscriber-id")
+    mobile = payload.mobile or request.headers.get("x-subscriber-mobile")
+
+    if await verify_bdapps_subscriber(subscriber_id, mobile):
+        return _subscribed_quota_payload()
+
+    client_ip = extract_client_ip(request.headers, request.client.host if request.client else None)
+    device_hash = payload.deviceHash or request.headers.get("x-device-hash") or ""
+
+    if payload.action == "consume" and payload.symbol:
+        clean_symbol = validate_symbol(payload.symbol)
+        state = check_and_consume_quota(client_ip, device_hash, clean_symbol)
+        if not state["allowed"]:
+            return JSONResponse(
+                status_code=429,
+                content={
+                    **state,
+                    "detail": "আজকের ২টি ফ্রি বিশ্লেষণ শেষ হয়েছে! আনলিমিটেড অ্যাক্সেসের জন্য Robi & Cirkle নম্বর দিয়ে সাবস্ক্রাইব করুন।",
+                },
+            )
+        return state
+
+    return get_quota_status(client_ip, device_hash)
+
+
 @app.get("/api/analyze")
 async def analyze_stock(
+    request: Request,
     symbol: str = Query(..., min_length=1, max_length=20),
     exchange: Literal["DSE", "CSE"] = Query(default="DSE"),
-) -> dict[str, Any]:
+):
     clean_symbol = validate_symbol(symbol)
+    quota_state, blocked_response = await _enforce_analysis_quota(request, clean_symbol)
+    if blocked_response is not None:
+        return blocked_response
+
     result = await fetch_and_analyze_stock(clean_symbol, exchange)
     if result:
-        return result
+        return {**result, "quota": quota_state}
     raise HTTPException(
         status_code=422,
         detail=f"লাইভ সার্ভার থেকে {clean_symbol}-এর ডেটা এখন পাওয়া যায়নি। ডকুমেন্ট আপলোড অথবা ম্যানুয়াল ইনপুট ব্যবহার করুন।",
@@ -505,8 +717,12 @@ async def analyze_stock(
 
 
 @app.post("/api/analyze-manual")
-async def analyze_manual_stock(payload: ManualStockInput) -> dict[str, Any]:
+async def analyze_manual_stock(request: Request, payload: ManualStockInput):
     clean_symbol = validate_symbol(payload.symbol)
+    quota_state, blocked_response = await _enforce_analysis_quota(request, clean_symbol)
+    if blocked_response is not None:
+        return blocked_response
+
     df = build_manual_ohlcv_frame(
         open_price=payload.open_price,
         high_price=payload.high_price,
@@ -519,7 +735,7 @@ async def analyze_manual_stock(payload: ManualStockInput) -> dict[str, Any]:
         clean_symbol, payload.exchange, df, source_label="User Verified OHLCV Input"
     )
     result["ai_analysis_bn"] = await generate_humanized_advice(result, "User Verified OHLCV Input")
-    return result
+    return {**result, "quota": quota_state}
 
 
 def _validate_upload_bytes(filename: str, content_type: str, data: bytes) -> str:
@@ -542,10 +758,11 @@ def _validate_upload_bytes(filename: str, content_type: str, data: bytes) -> str
 
 @app.post("/api/analyze-document")
 async def analyze_document(
+    request: Request,
     files: list[UploadFile] = File(...),
     symbol: str = Form("STOCK"),
     exchange: Literal["DSE", "CSE"] = Form("DSE"),
-) -> dict[str, Any]:
+):
     if not AI_API_KEY or _http_client is None:
         raise HTTPException(status_code=503, detail="ডকুমেন্ট AI সার্ভিস বর্তমানে কনফিগার করা নেই।")
 
@@ -553,6 +770,10 @@ async def analyze_document(
         raise HTTPException(status_code=400, detail=f"সর্বোচ্চ {MAX_UPLOAD_FILES}টি ফাইল একসাথে আপলোড করা যাবে।")
 
     clean_symbol = validate_symbol(symbol)
+    quota_state, blocked_response = await _enforce_analysis_quota(request, clean_symbol)
+    if blocked_response is not None:
+        return blocked_response
+
     combined_pdf_text = ""
     image_contents: list[dict[str, Any]] = []
 
@@ -629,7 +850,7 @@ async def analyze_document(
         df = build_manual_ohlcv_frame(o, h, l, c, ycp, vol)
         result = analyze_ohlcv_dataframe(clean_symbol, exchange, df, source_label=f"AI Document OCR ({len(files)} file)")
         result["ai_analysis_bn"] = await generate_humanized_advice(result, f"Extracted from {len(files)} uploaded document(s)")
-        return result
+        return {**result, "quota": quota_state}
     except HTTPException:
         raise
     except Exception as exc:

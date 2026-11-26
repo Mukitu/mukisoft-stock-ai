@@ -1,15 +1,18 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Loader2, RefreshCw, RotateCcw } from 'lucide-react';
+import { Loader2, Lock, RefreshCw, RotateCcw } from 'lucide-react';
 import type { Exchange } from '../types/market';
 import { DSE_CSE_SECTORS, findSectorBySymbol } from '../data/symbolCatalog';
 import { useStockAnalysis } from '../hooks/useMarketQueries';
+import { useFreeQuota } from '../hooks/useFreeQuota';
 import {
   TradingViewTerminal,
   type TerminalIndicatorToggles,
 } from '../components/charts/TradingViewTerminal';
+import { FreeQuotaPaywallModal } from '../components/bdapps/FreeQuotaPaywallModal';
 import { buildStructuredBanglaReport } from '../utils/quantConsensus';
 import { LIVE_FEED_WAITING_BN } from '../services/apiClient';
+import { QuotaExceededError } from '../services/quotaService';
 
 const SECTOR_NAMES = Object.keys(DSE_CSE_SECTORS);
 
@@ -34,6 +37,9 @@ export function MarketTerminalPage() {
     rsi: true,
   });
 
+  const [paywallOpen, setPaywallOpen] = useState(false);
+  const { liveResetSeconds, markSubscribed } = useFreeQuota();
+
   const {
     data: analysis,
     isFetching,
@@ -41,7 +47,14 @@ export function MarketTerminalPage() {
     error: queryError,
     refetch,
   } = useStockAnalysis(symbol, exchange, symbol.length > 0);
+  const isQuotaError = queryError instanceof QuotaExceededError;
   const report = analysis ? buildStructuredBanglaReport(analysis) : null;
+
+  useEffect(() => {
+    if (isQuotaError) {
+      setPaywallOpen(true);
+    }
+  }, [isQuotaError]);
 
   const updateSelection = (nextSym: string, nextExch: Exchange) => {
     setSymbol(nextSym);
@@ -239,6 +252,20 @@ export function MarketTerminalPage() {
             <Loader2 className="w-8 h-8 text-blue-700 animate-spin mx-auto" />
             <p className="text-sm font-semibold text-slate-800">{LIVE_FEED_WAITING_BN}</p>
           </div>
+        ) : isQuotaError ? (
+          <div className="py-14 text-center space-y-3">
+            <Lock className="w-7 h-7 text-amber-600 mx-auto" />
+            <p className="text-sm font-bold text-slate-900">
+              আজকের ২টি ফ্রি বিশ্লেষণ শেষ হয়েছে!
+            </p>
+            <button
+              type="button"
+              onClick={() => setPaywallOpen(true)}
+              className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-lg bg-blue-700 hover:bg-blue-800 text-white text-xs font-semibold cursor-pointer"
+            >
+              <span>Robi &amp; Cirkle দিয়ে আনলক করুন</span>
+            </button>
+          </div>
         ) : isError && !analysis ? (
           <div className="py-14 text-center space-y-3">
             <p className="text-sm font-semibold text-slate-800">
@@ -281,6 +308,17 @@ export function MarketTerminalPage() {
           </Link>
         </section>
       )}
+      <FreeQuotaPaywallModal
+        isOpen={paywallOpen}
+        resetInSeconds={liveResetSeconds}
+        requestedSymbol={symbol || undefined}
+        onClose={() => setPaywallOpen(false)}
+        onSubscribed={() => {
+          markSubscribed();
+          setPaywallOpen(false);
+          void refetch();
+        }}
+      />
     </main>
   );
 }

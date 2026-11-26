@@ -8,6 +8,7 @@ import {
   fetchTopPicks,
 } from '../services/apiClient';
 import { getBDMarketSession } from '../utils/bdMarketSession';
+import { QuotaExceededError } from '../services/quotaService';
 
 export function useMarketLive() {
   const session = getBDMarketSession();
@@ -25,6 +26,8 @@ export function useTopPicks() {
     queryKey: ['top-picks', session.mode],
     queryFn: fetchTopPicks,
     staleTime: session.is_live ? 120_000 : 15 * 60_000,
+    retry: 2,
+    retryDelay: 2_500,
   });
 }
 
@@ -35,7 +38,7 @@ export function useStockAnalysis(symbol: string, exchange: Exchange, enabled = t
     queryFn: () => analyzeStock(cleanSym, exchange),
     enabled: enabled && cleanSym.length > 0,
     staleTime: 180_000,
-    retry: 1,
+    retry: (failureCount, error) => !(error instanceof QuotaExceededError) && failureCount < 1,
   });
 }
 

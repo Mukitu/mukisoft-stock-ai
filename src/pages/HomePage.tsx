@@ -16,11 +16,10 @@ import type { Exchange, TopPick } from '../types/market';
 import { useTopPicks } from '../hooks/useMarketQueries';
 import { getBDMarketSession } from '../utils/bdMarketSession';
 import { BdappsSubscriptionCard } from '../components/bdapps/BdappsSubscriptionCard';
-import {
-  consumeBdappsToast,
-  getBdappsSession,
-  isSessionActive,
-} from '../services/bdappsService';
+import { FreeQuotaPaywallModal } from '../components/bdapps/FreeQuotaPaywallModal';
+import { FreeQuotaBanner } from '../components/common/FreeQuotaBanner';
+import { useFreeQuota } from '../hooks/useFreeQuota';
+import { consumeBdappsToast } from '../services/bdappsService';
 import { LIVE_FEED_WAITING_BN } from '../services/apiClient';
 import {
   STRONG_BUY_BADGE_BN,
@@ -37,11 +36,22 @@ export function HomePage() {
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [unlockPrompt, setUnlockPrompt] = useState<string | null>(null);
   const [cardHighlighted, setCardHighlighted] = useState(false);
+  const [isCheckingQuota, setIsCheckingQuota] = useState(false);
+  const [paywallOpen, setPaywallOpen] = useState(false);
+  const [pendingSearch, setPendingSearch] = useState<{ symbol: string; exchange: Exchange } | null>(
+    null
+  );
 
   const highlightTimerRef = useRef<number | null>(null);
 
   const session = getBDMarketSession();
-  const isSubscribed = isSessionActive(getBdappsSession());
+  const {
+    isSubscribed,
+    remaining,
+    liveResetSeconds,
+    authorizeSymbolAnalysis,
+    markSubscribed,
+  } = useFreeQuota();
   const { data: picksData, isLoading, isFetching, refetch } = useTopPicks();
   const picks: TopPick[] = picksData?.picks || [];
   const isLiveUnavailable = Boolean(picksData?.live_unavailable);
@@ -58,11 +68,48 @@ export function HomePage() {
     };
   }, []);
 
+  const launchAnalyzedSymbol = async (sym: string, targetExchange: Exchange, extraQuery = '') => {
+    const cleanSym = sym.trim().toUpperCase();
+    if (!cleanSym) return;
+
+    if (isSubscribed) {
+      navigate(
+        `/analyzer?symbol=${encodeURIComponent(cleanSym)}&exchange=${targetExchange}${extraQuery}`
+      );
+      return;
+    }
+
+    setIsCheckingQuota(true);
+    try {
+      const check = await authorizeSymbolAnalysis(cleanSym);
+      if (!check.allowed) {
+        setPendingSearch({ symbol: cleanSym, exchange: targetExchange });
+        setPaywallOpen(true);
+        return;
+      }
+      navigate(
+        `/analyzer?symbol=${encodeURIComponent(cleanSym)}&exchange=${targetExchange}${extraQuery}`
+      );
+    } finally {
+      setIsCheckingQuota(false);
+    }
+  };
+
   const handleQuickSearch = (e: FormEvent) => {
     e.preventDefault();
     const sym = symbolInput.trim().toUpperCase();
     if (!sym) return;
-    navigate(`/analyzer?symbol=${encodeURIComponent(sym)}&exchange=${exchange}`);
+    void launchAnalyzedSymbol(sym, exchange);
+  };
+
+  const handleModalSubscribed = () => {
+    markSubscribed();
+    setPaywallOpen(false);
+    if (pendingSearch) {
+      const target = pendingSearch;
+      setPendingSearch(null);
+      navigate(`/analyzer?symbol=${encodeURIComponent(target.symbol)}&exchange=${target.exchange}`);
+    }
   };
 
   const handleLockedCardClick = () => {
@@ -172,11 +219,28 @@ export function HomePage() {
 
               <button
                 type="submit"
-                className="w-full sm:w-auto bg-blue-700 hover:bg-blue-800 text-white font-semibold px-6 py-3 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                disabled={isCheckingQuota}
+                className="w-full sm:w-auto bg-blue-700 hover:bg-blue-800 disabled:opacity-65 text-white font-semibold px-6 py-3 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
               >
-                বিশ্লেষণ দেখুন
+                {isCheckingQuota ? 'যাচাই হচ্ছে...' : 'বিশ্লেষণ দেখুন'}
               </button>
             </form>
+
+            {/* Real-Time Server-Enforced 24-Hour Free Trial Quota Status */}
+            <FreeQuotaBanner
+              isSubscribed={isSubscribed}
+              remaining={remaining}
+              liveResetSeconds={liveResetSeconds}
+              onOpenPaywall={() => {
+                setPendingSearch(
+                  symbolInput.trim()
+                    ? { symbol: symbolInput.trim().toUpperCase(), exchange }
+                    : null
+                );
+                setPaywallOpen(true);
+              }}
+              className="max-w-xl"
+            />
 
             {/* Trust Metrics Row */}
             <div className="pt-4 grid grid-cols-3 gap-3 sm:gap-6 max-w-lg border-t border-slate-200 min-w-0">
@@ -245,7 +309,11 @@ export function HomePage() {
             <div className="bg-white border border-slate-200 rounded-xl p-8 text-center space-y-4">
               {isLiveUnavailable ? (
                 <>
-                  <Loader2 className={`w-7 h-7 text-blue-700 mx-auto ${isFetching ? 'animate-spin' : ''}`} />
+                  {isFetching ? (
+                    <Loader2 className="w-7 h-7 text-blue-700 mx-auto animate-spin" />
+                  ) : (
+                    <RefreshCw className="w-7 h-7 text-blue-700 mx-auto" />
+                  )}
                   <p className="text-sm font-semibold text-slate-800">{LIVE_FEED_WAITING_BN}</p>
                   <p className="text-xs text-slate-500 max-w-lg mx-auto">
                     কোনো ডেমো বা অনুমানভিত্তিক স্টক দেখানো হয় না। লাইভ সার্ভার প্রস্তুত হলেই প্রকৃত ১৫–২০/২০ Strong Buy স্টক তালিকা স্বয়ংক্রিয়ভাবে লোড হবে।
@@ -449,13 +517,15 @@ export function HomePage() {
                       <span className="text-xs font-medium text-slate-600 truncate">
                         {session.cardTiming}
                       </span>
-                      <Link
-                        to={`/analyzer?symbol=${encodeURIComponent(item.symbol)}&exchange=${item.exchange}&pick=buy`}
-                        className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-blue-700 hover:bg-blue-800 text-white text-xs font-semibold transition-colors whitespace-nowrap shrink-0"
+                      <button
+                        type="button"
+                        onClick={() => void launchAnalyzedSymbol(item.symbol, item.exchange, '&pick=buy')}
+                        disabled={isCheckingQuota}
+                        className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-blue-700 hover:bg-blue-800 disabled:opacity-60 text-white text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer"
                       >
                         <span>AI রিপোর্ট</span>
                         <ArrowRight className="w-3.5 h-3.5" />
-                      </Link>
+                      </button>
                     </div>
                   </article>
                 );
@@ -536,6 +606,14 @@ export function HomePage() {
           </div>
         </div>
       </section>
+      {/* Tamper-Proof 24-Hour Free Quota Paywall Modal */}
+      <FreeQuotaPaywallModal
+        isOpen={paywallOpen}
+        resetInSeconds={liveResetSeconds}
+        requestedSymbol={pendingSearch?.symbol}
+        onClose={() => setPaywallOpen(false)}
+        onSubscribed={handleModalSubscribed}
+      />
     </div>
   );
 }

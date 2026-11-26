@@ -25,6 +25,7 @@ import {
   saveBdappsSession,
   savePendingOtp,
   verifyBdappsOtp,
+  type BdappsSession,
 } from '../../services/bdappsService';
 
 type CardStep = 'mobile' | 'otp' | 'verified';
@@ -32,11 +33,15 @@ type CardStep = 'mobile' | 'otp' | 'verified';
 interface BdappsSubscriptionCardProps {
   highlighted?: boolean;
   unlockPrompt?: string | null;
+  embeddedInModal?: boolean;
+  onSubscribed?: (session: BdappsSession) => void;
 }
 
 export function BdappsSubscriptionCard({
   highlighted = false,
   unlockPrompt = null,
+  embeddedInModal = false,
+  onSubscribed,
 }: BdappsSubscriptionCardProps) {
   const navigate = useNavigate();
 
@@ -56,10 +61,15 @@ export function BdappsSubscriptionCard({
   const redirectTimerRef = useRef<number | null>(null);
 
   // Auto-redirect returning verified Robi & Cirkle subscribers directly to /dashboard
+  // (when rendered inline on Home; inside Paywall Modal we invoke onSubscribed directly)
   useEffect(() => {
     const existing = getBdappsSession();
     if (isSessionActive(existing)) {
-      navigate('/dashboard', { replace: true });
+      if (onSubscribed) {
+        onSubscribed(existing);
+      } else {
+        navigate('/dashboard', { replace: true });
+      }
       return;
     }
 
@@ -71,7 +81,7 @@ export function BdappsSubscriptionCard({
       setReferenceNo(pending.referenceNo);
       setStep('otp');
     }
-  }, [navigate]);
+  }, [navigate, onSubscribed]);
 
   // 30-second resend cooldown timer
   useEffect(() => {
@@ -122,9 +132,17 @@ export function BdappsSubscriptionCard({
           saveBdappsSession(session);
           clearPendingOtp();
           setStep('verified');
-          setStatusMsg('আপনার Robi & Cirkle নম্বরটি ইতিমধ্যেই সক্রিয় রয়েছে। ড্যাশবোর্ডে নিয়ে যাওয়া হচ্ছে...');
+          setStatusMsg(
+            onSubscribed
+              ? 'আপনার Robi & Cirkle সাবস্ক্রিপশন সক্রিয় আছে! আপনার কাঙ্ক্ষিত স্টক রিপোর্ট আনলক করা হচ্ছে...'
+              : 'আপনার Robi & Cirkle নম্বরটি ইতিমধ্যেই সক্রিয় রয়েছে। ড্যাশবোর্ডে নিয়ে যাওয়া হচ্ছে...'
+          );
           redirectTimerRef.current = window.setTimeout(() => {
-            navigate('/dashboard', { replace: true, state: { freshHandoff: true } });
+            if (onSubscribed) {
+              onSubscribed(session);
+            } else {
+              navigate('/dashboard', { replace: true, state: { freshHandoff: true } });
+            }
           }, 400);
           return;
         }
@@ -144,9 +162,17 @@ export function BdappsSubscriptionCard({
         saveBdappsSession(session);
         clearPendingOtp();
         setStep('verified');
-        setStatusMsg('আপনার Robi & Cirkle সাবস্ক্রিপশন সক্রিয় আছে! ড্যাশবোর্ডে প্রবেশ করা হচ্ছে...');
+        setStatusMsg(
+          onSubscribed
+            ? 'আপনার Robi & Cirkle সাবস্ক্রিপশন সক্রিয় আছে! স্টক বিশ্লেষণ আনলক করা হচ্ছে...'
+            : 'আপনার Robi & Cirkle সাবস্ক্রিপশন সক্রিয় আছে! ড্যাশবোর্ডে প্রবেশ করা হচ্ছে...'
+        );
         redirectTimerRef.current = window.setTimeout(() => {
-          navigate('/dashboard', { replace: true, state: { freshHandoff: true } });
+          if (onSubscribed) {
+            onSubscribed(session);
+          } else {
+            navigate('/dashboard', { replace: true, state: { freshHandoff: true } });
+          }
         }, 400);
         return;
       }
@@ -199,7 +225,11 @@ export function BdappsSubscriptionCard({
         const session = buildActiveSessionFromResponse(activeMobile, otpRes, 'send_otp');
         saveBdappsSession(session);
         clearPendingOtp();
-        navigate('/dashboard', { replace: true, state: { freshHandoff: true } });
+        if (onSubscribed) {
+          onSubscribed(session);
+        } else {
+          navigate('/dashboard', { replace: true, state: { freshHandoff: true } });
+        }
         return;
       }
 
@@ -255,15 +285,23 @@ export function BdappsSubscriptionCard({
 
       if (isActiveSubscriptionPayload(verifyRes)) {
         const session = buildActiveSessionFromResponse(activeMobile, verifyRes, 'verify_otp');
-        // Save session synchronously BEFORE navigation
+        // Save session synchronously BEFORE navigation/unlock
         saveBdappsSession(session);
         clearPendingOtp();
         setStep('verified');
-        setStatusMsg('ভেরিফিকেশন সফল হয়েছে! আপনার প্রিমিয়াম ড্যাশবোর্ড আনলক করা হচ্ছে...');
+        setStatusMsg(
+          onSubscribed
+            ? 'ভেরিফিকেশন সফল হয়েছে! আপনার কাঙ্ক্ষিত স্টকের পূর্ণ AI বিশ্লেষণ আনলক করা হচ্ছে...'
+            : 'ভেরিফিকেশন সফল হয়েছে! আপনার প্রিমিয়াম ড্যাশবোর্ড আনলক করা হচ্ছে...'
+        );
 
-        // 700ms grace window before navigating to /dashboard
+        // 700ms grace window before unlocking or navigating to /dashboard
         redirectTimerRef.current = window.setTimeout(() => {
-          navigate('/dashboard', { replace: true, state: { freshHandoff: true } });
+          if (onSubscribed) {
+            onSubscribed(session);
+          } else {
+            navigate('/dashboard', { replace: true, state: { freshHandoff: true } });
+          }
         }, VERIFY_REDIRECT_GRACE_MS);
         return;
       }
@@ -291,47 +329,56 @@ export function BdappsSubscriptionCard({
     setStep('mobile');
   };
 
+  const mobileInputId = embeddedInModal ? 'bdapps-modal-mobile-input' : 'bdapps-mobile-input';
+  const otpInputId = embeddedInModal ? 'bdapps-modal-otp-input' : 'bdapps-otp-input';
+
   return (
     <div
-      id="bdapps-subscription-card"
-      className={`w-full min-w-0 max-w-full bg-slate-50 border rounded-2xl p-4 sm:p-6 flex flex-col justify-between h-full shadow-xs transition-all duration-300 ${
-        highlighted
-          ? 'border-blue-600 ring-4 ring-blue-600/20'
-          : 'border-slate-200'
+      id={embeddedInModal ? 'bdapps-modal-subscription-card' : 'bdapps-subscription-card'}
+      className={`w-full min-w-0 max-w-full rounded-2xl flex flex-col justify-between transition-all duration-300 ${
+        embeddedInModal
+          ? 'bg-slate-50 border border-slate-200 p-4 sm:p-5'
+          : `bg-slate-50 border p-4 sm:p-6 h-full shadow-xs ${
+              highlighted
+                ? 'border-blue-600 ring-4 ring-blue-600/20'
+                : 'border-slate-200'
+            }`
       }`}
     >
       {/* Always-Visible Official BDApps Pricing Header */}
-      <div className="space-y-2.5 sm:space-y-3 pb-4 sm:pb-5 border-b border-slate-200 min-w-0">
-        <div className="inline-flex items-center text-[11px] font-semibold text-blue-800 bg-blue-50 border border-blue-200/80 px-2.5 py-1 rounded-md max-w-full leading-snug">
-          <span>🇧🇩 অফিসিয়াল বিডিঅ্যাপস সাবস্ক্রিপশন • কোনো পাসওয়ার্ড লাগবে না</span>
-        </div>
-
-        <div className="space-y-1">
-          <h2 className="text-lg sm:text-2xl font-extrabold text-slate-900 tracking-tight leading-snug">
-            ৳২.৭৮ টাকা /দিন{' '}
-            <span className="text-xs sm:text-sm font-semibold text-slate-600 inline-block">
-              (ভ্যাট + এসডি + এসসি সহ)
-            </span>
-          </h2>
-          <p className="text-xs sm:text-[13px] text-slate-600 leading-relaxed">
-            আপনার Robi &amp; Cirkle মোবাইল নম্বর দিন, OTP আসবে সেই নম্বরে। ভেরিফাই ও অ্যাক্টিভেট করলেই আপনার ড্যাশবোর্ড ও সকল প্রিমিয়াম AI সিগন্যাল আনলক হয়ে যাবে।
-          </p>
-        </div>
-
-        {unlockPrompt && (
-          <div className="rounded-lg bg-blue-50 border border-blue-200 px-3 py-2 text-xs font-semibold text-blue-900 leading-relaxed">
-            {unlockPrompt}
+      {!embeddedInModal && (
+        <div className="space-y-2.5 sm:space-y-3 pb-4 sm:pb-5 border-b border-slate-200 min-w-0">
+          <div className="inline-flex items-center text-[11px] font-semibold text-blue-800 bg-blue-50 border border-blue-200/80 px-2.5 py-1 rounded-md max-w-full leading-snug">
+            <span>🇧🇩 অফিসিয়াল বিডিঅ্যাপস সাবস্ক্রিপশন • কোনো পাসওয়ার্ড লাগবে না</span>
           </div>
-        )}
-      </div>
+
+          <div className="space-y-1">
+            <h2 className="text-lg sm:text-2xl font-extrabold text-slate-900 tracking-tight leading-snug">
+              ৳২.৭৮ টাকা /দিন{' '}
+              <span className="text-xs sm:text-sm font-semibold text-slate-600 inline-block">
+                (ভ্যাট + এসডি + এসসি সহ)
+              </span>
+            </h2>
+            <p className="text-xs sm:text-[13px] text-slate-600 leading-relaxed">
+              আপনার Robi &amp; Cirkle মোবাইল নম্বর দিন, OTP আসবে সেই নম্বরে। ভেরিফাই ও অ্যাক্টিভেট করলেই আপনার ড্যাশবোর্ড ও সকল প্রিমিয়াম AI সিগন্যাল আনলক হয়ে যাবে।
+            </p>
+          </div>
+
+          {unlockPrompt && (
+            <div className="rounded-lg bg-blue-50 border border-blue-200 px-3 py-2 text-xs font-semibold text-blue-900 leading-relaxed">
+              {unlockPrompt}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Interactive Card Body: Step 1 -> Step 2 -> Verified */}
-      <div className="py-4 sm:py-5 flex-1 flex flex-col justify-center min-w-0">
+      <div className={`${embeddedInModal ? 'pb-3' : 'py-4 sm:py-5'} flex-1 flex flex-col justify-center min-w-0`}>
         {step === 'mobile' && (
           <form onSubmit={handleMobileSubmit} className="space-y-3.5 sm:space-y-4 w-full min-w-0" noValidate>
             <div className="space-y-1.5 min-w-0">
               <label
-                htmlFor="bdapps-mobile-input"
+                htmlFor={mobileInputId}
                 className="flex items-center gap-1.5 text-sm font-bold text-slate-800"
               >
                 <Smartphone className="w-4 h-4 text-blue-700 shrink-0" />
@@ -343,7 +390,7 @@ export function BdappsSubscriptionCard({
                   +880
                 </span>
                 <input
-                  id="bdapps-mobile-input"
+                  id={mobileInputId}
                   type="tel"
                   inputMode="numeric"
                   autoComplete="tel-national"
@@ -417,12 +464,12 @@ export function BdappsSubscriptionCard({
             </div>
 
             <div>
-              <label htmlFor="bdapps-otp-input" className="sr-only">
+              <label htmlFor={otpInputId} className="sr-only">
                 ৬ ডিজিটের কোড বসান
               </label>
               <input
                 ref={otpInputRef}
-                id="bdapps-otp-input"
+                id={otpInputId}
                 type="text"
                 inputMode="numeric"
                 autoComplete="one-time-code"

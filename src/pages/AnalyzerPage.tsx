@@ -1,29 +1,39 @@
-import { useEffect, useState, type ClipboardEvent, type FormEvent } from 'react';
+import { useCallback, useEffect, useState, type ClipboardEvent, type FormEvent } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
   Check,
   ExternalLink,
   FileUp,
+  Lock,
   RefreshCw,
   Trash2,
   TrendingUp,
 } from 'lucide-react';
-import type { Exchange, StockAnalysis } from '../types/market';
+import type { Exchange, ManualStockPayload, StockAnalysis } from '../types/market';
 import { DSE_CSE_SECTORS, findSectorBySymbol } from '../data/symbolCatalog';
 import {
   useDocumentAnalysisMutation,
   useManualAnalysisMutation,
   useStockAnalysis,
 } from '../hooks/useMarketQueries';
+import { useFreeQuota } from '../hooks/useFreeQuota';
 import { PriceMovementChart } from '../components/charts/PriceMovementChart';
 import { BanglaReportCard } from '../components/common/BanglaReportCard';
+import { FreeQuotaBanner } from '../components/common/FreeQuotaBanner';
+import { FreeQuotaPaywallModal } from '../components/bdapps/FreeQuotaPaywallModal';
 import { LIVE_FEED_WAITING_BN } from '../services/apiClient';
+import { QuotaExceededError } from '../services/quotaService';
 import {
   formatStrongBuyConsensusLine,
   toBanglaDigits,
 } from '../utils/quantConsensus';
 
 const SECTOR_NAMES = Object.keys(DSE_CSE_SECTORS);
+
+type PendingBlockedAction =
+  | { type: 'live'; symbol: string; exchange: Exchange }
+  | { type: 'manual'; payload: ManualStockPayload }
+  | { type: 'document'; files: File[]; symbol: string; exchange: Exchange };
 
 export function AnalyzerPage() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -59,6 +69,27 @@ export function AnalyzerPage() {
   const [manualError, setManualError] = useState<string | null>(null);
 
   const [actionFeedback, setActionFeedback] = useState<string | null>(null);
+  const [authorizedKey, setAuthorizedKey] = useState<string>('');
+  const [isAuthorizingQuota, setIsAuthorizingQuota] = useState(false);
+  const [quotaBlocked, setQuotaBlocked] = useState(false);
+  const [paywallOpen, setPaywallOpen] = useState(false);
+  const [pendingAction, setPendingAction] = useState<PendingBlockedAction | null>(null);
+
+  const {
+    isSubscribed,
+    remaining,
+    liveResetSeconds,
+    authorizeSymbolAnalysis,
+    markSubscribed,
+  } = useFreeQuota();
+
+  const currentQueryKey = activeQuery.symbol
+    ? `${activeQuery.exchange}:${activeQuery.symbol}`
+    : '';
+  const canRunLiveQuery =
+    activeQuery.symbol.length > 0 &&
+    !quotaBlocked &&
+    (isSubscribed || authorizedKey === currentQueryKey);
 
   const {
     data: liveAnalysis,
@@ -66,11 +97,81 @@ export function AnalyzerPage() {
     isError,
     error: queryError,
     refetch,
-  } = useStockAnalysis(activeQuery.symbol, activeQuery.exchange, activeQuery.symbol.length > 0);
+  } = useStockAnalysis(activeQuery.symbol, activeQuery.exchange, canRunLiveQuery);
   const manualMutation = useManualAnalysisMutation();
   const docMutation = useDocumentAnalysisMutation();
 
-  const currentAnalysis: StockAnalysis | undefined = overrideAnalysis || liveAnalysis;
+  const currentAnalysis: StockAnalysis | undefined = quotaBlocked
+    ? undefined
+    : overrideAnalysis || liveAnalysis;
+
+  const authorizeLiveSymbol = useCallback(
+    async (sym: string, exch: Exchange) => {
+      const clean = sym.trim().toUpperCase();
+      if (!clean) return;
+      const key = `${exch}:${clean}`;
+
+      if (isSubscribed) {
+        setQuotaBlocked(false);
+        setAuthorizedKey(key);
+        return;
+      }
+
+      setIsAuthorizingQuota(true);
+      try {
+        const res = await authorizeSymbolAnalysis(clean);
+        if (!res.allowed) {
+          setQuotaBlocked(true);
+          setAuthorizedKey('');
+          setOverrideAnalysis(null);
+          setPendingAction({ type: 'live', symbol: clean, exchange: exch });
+          setPaywallOpen(true);
+          return;
+        }
+        setQuotaBlocked(false);
+        setAuthorizedKey(key);
+      } finally {
+        setIsAuthorizingQuota(false);
+      }
+    },
+    [authorizeSymbolAnalysis, isSubscribed]
+  );
+
+  // Authorize initial symbol or deep-link changes through server-enforced 24h quota
+  useEffect(() => {
+    if (!activeQuery.symbol || quotaBlocked) return;
+    if (isSubscribed) {
+      setQuotaBlocked(false);
+      setAuthorizedKey(`${activeQuery.exchange}:${activeQuery.symbol}`);
+      return;
+    }
+    if (authorizedKey === `${activeQuery.exchange}:${activeQuery.symbol}`) {
+      return;
+    }
+    void authorizeLiveSymbol(activeQuery.symbol, activeQuery.exchange);
+  }, [
+    activeQuery.symbol,
+    activeQuery.exchange,
+    isSubscribed,
+    authorizedKey,
+    quotaBlocked,
+    authorizeLiveSymbol,
+  ]);
+
+  // If /api/analyze itself returns HTTP 429, immediately block and show Bangla Paywall Modal
+  useEffect(() => {
+    if (queryError instanceof QuotaExceededError) {
+      setQuotaBlocked(true);
+      setAuthorizedKey('');
+      setOverrideAnalysis(null);
+      setPendingAction({
+        type: 'live',
+        symbol: activeQuery.symbol,
+        exchange: activeQuery.exchange,
+      });
+      setPaywallOpen(true);
+    }
+  }, [queryError, activeQuery.symbol, activeQuery.exchange]);
 
   // Sync URL query params if user navigates via deep link
   useEffect(() => {
@@ -80,6 +181,7 @@ export function AnalyzerPage() {
       setSymbolInput(qSym);
       setExchange(qExch);
       setOverrideAnalysis(null);
+      setQuotaBlocked(false);
       setActiveQuery({ symbol: qSym, exchange: qExch });
       const found = findSectorBySymbol(qSym);
       if (SECTOR_NAMES.includes(found)) setSelectedSector(found);
@@ -92,6 +194,14 @@ export function AnalyzerPage() {
     if (!clean) return;
     setOverrideAnalysis(null);
     setActionFeedback(null);
+    setQuotaBlocked(false);
+
+    if (clean === activeQuery.symbol && exchange === activeQuery.exchange) {
+      void authorizeLiveSymbol(clean, exchange);
+      return;
+    }
+
+    setAuthorizedKey('');
     setActiveQuery({ symbol: clean, exchange });
     setSearchParams({ symbol: clean, exchange });
   };
@@ -120,6 +230,40 @@ export function AnalyzerPage() {
     }
   };
 
+  const executeDocumentAnalysis = async (files: File[], sym: string, exch: Exchange, skipPrecheck = false) => {
+    setUploadError(null);
+    const cleanSym = sym.trim().toUpperCase() || 'STOCK';
+
+    if (!skipPrecheck && !isSubscribed) {
+      const quotaCheck = await authorizeSymbolAnalysis(cleanSym);
+      if (!quotaCheck.allowed) {
+        setQuotaBlocked(true);
+        setPendingAction({ type: 'document', files, symbol: cleanSym, exchange: exch });
+        setPaywallOpen(true);
+        return;
+      }
+    }
+
+    try {
+      const res = await docMutation.mutateAsync({
+        files,
+        symbol: cleanSym,
+        exchange: exch,
+      });
+      setQuotaBlocked(false);
+      setOverrideAnalysis(res);
+      setActionFeedback('ডকুমেন্ট OCR বিশ্লেষণ সম্পন্ন হয়েছে।');
+    } catch (err) {
+      if (err instanceof QuotaExceededError) {
+        setQuotaBlocked(true);
+        setPendingAction({ type: 'document', files, symbol: cleanSym, exchange: exch });
+        setPaywallOpen(true);
+        return;
+      }
+      setUploadError(err instanceof Error ? err.message : 'ডকুমেন্ট বিশ্লেষণ ব্যর্থ হয়েছে।');
+    }
+  };
+
   const handleDocumentSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setUploadError(null);
@@ -127,16 +271,35 @@ export function AnalyzerPage() {
       setUploadError('অনুগ্রহ করে অন্তত একটি স্ক্রিনশট (PNG/JPG) অথবা PDF ফাইল যোগ করুন।');
       return;
     }
+    await executeDocumentAnalysis(uploadedFiles, symbolInput.trim().toUpperCase() || 'STOCK', exchange);
+  };
+
+  const executeManualAnalysis = async (payload: ManualStockPayload, skipPrecheck = false) => {
+    setManualError(null);
+
+    if (!skipPrecheck && !isSubscribed) {
+      const quotaCheck = await authorizeSymbolAnalysis(payload.symbol);
+      if (!quotaCheck.allowed) {
+        setQuotaBlocked(true);
+        setPendingAction({ type: 'manual', payload });
+        setPaywallOpen(true);
+        return;
+      }
+    }
+
     try {
-      const res = await docMutation.mutateAsync({
-        files: uploadedFiles,
-        symbol: symbolInput.trim().toUpperCase() || 'STOCK',
-        exchange,
-      });
+      const res = await manualMutation.mutateAsync(payload);
+      setQuotaBlocked(false);
       setOverrideAnalysis(res);
-      setActionFeedback('ডকুমেন্ট OCR বিশ্লেষণ সম্পন্ন হয়েছে।');
+      setActionFeedback('ম্যানুয়াল OHLCV বিশ্লেষণ সম্পন্ন হয়েছে।');
     } catch (err) {
-      setUploadError(err instanceof Error ? err.message : 'ডকুমেন্ট বিশ্লেষণ ব্যর্থ হয়েছে।');
+      if (err instanceof QuotaExceededError) {
+        setQuotaBlocked(true);
+        setPendingAction({ type: 'manual', payload });
+        setPaywallOpen(true);
+        return;
+      }
+      setManualError(err instanceof Error ? err.message : LIVE_FEED_WAITING_BN);
     }
   };
 
@@ -159,21 +322,42 @@ export function AnalyzerPage() {
       return;
     }
 
-    try {
-      const res = await manualMutation.mutateAsync({
-        symbol: symbolInput.trim().toUpperCase() || 'STOCK',
-        exchange,
-        open_price: o,
-        high_price: h,
-        low_price: l,
-        close_price: c,
-        yesterday_close: ycp,
-        volume: vol,
-      });
-      setOverrideAnalysis(res);
-      setActionFeedback('ম্যানুয়াল OHLCV বিশ্লেষণ সম্পন্ন হয়েছে।');
-    } catch (err) {
-      setManualError(err instanceof Error ? err.message : LIVE_FEED_WAITING_BN);
+    await executeManualAnalysis({
+      symbol: symbolInput.trim().toUpperCase() || 'STOCK',
+      exchange,
+      open_price: o,
+      high_price: h,
+      low_price: l,
+      close_price: c,
+      yesterday_close: ycp,
+      volume: vol,
+    });
+  };
+
+  const handleModalSubscribed = () => {
+    markSubscribed();
+    setPaywallOpen(false);
+    setQuotaBlocked(false);
+
+    const action = pendingAction;
+    setPendingAction(null);
+    if (!action) {
+      if (activeQuery.symbol) {
+        setAuthorizedKey(`${activeQuery.exchange}:${activeQuery.symbol}`);
+      }
+      return;
+    }
+
+    if (action.type === 'live') {
+      setSymbolInput(action.symbol);
+      setExchange(action.exchange);
+      setActiveQuery({ symbol: action.symbol, exchange: action.exchange });
+      setAuthorizedKey(`${action.exchange}:${action.symbol}`);
+      setSearchParams({ symbol: action.symbol, exchange: action.exchange });
+    } else if (action.type === 'manual') {
+      void executeManualAnalysis(action.payload, true);
+    } else if (action.type === 'document') {
+      void executeDocumentAnalysis(action.files, action.symbol, action.exchange, true);
     }
   };
 
@@ -288,12 +472,20 @@ export function AnalyzerPage() {
 
           <button
             type="submit"
-            disabled={isFetching}
+            disabled={isFetching || isAuthorizingQuota}
             className="bg-blue-700 hover:bg-blue-800 disabled:opacity-60 text-white font-semibold px-7 py-2.5 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
           >
-            {isFetching ? 'বিশ্লেষণ চলছে...' : 'বিশ্লেষণ শুরু করুন'}
+            {isFetching || isAuthorizingQuota ? 'বিশ্লেষণ চলছে...' : 'বিশ্লেষণ শুরু করুন'}
           </button>
         </form>
+
+        {/* Server-Enforced 24-Hour Free Trial Quota Status Banner */}
+        <FreeQuotaBanner
+          isSubscribed={isSubscribed}
+          remaining={remaining}
+          liveResetSeconds={liveResetSeconds}
+          onOpenPaywall={() => setPaywallOpen(true)}
+        />
       </section>
 
       {/* Optional Multi-File OCR & Manual OHLCV Panel */}
@@ -503,7 +695,28 @@ export function AnalyzerPage() {
       )}
 
       {/* Results Dashboard */}
-      {!activeQuery.symbol && !currentAnalysis ? (
+      {quotaBlocked ? (
+        <div className="bg-white border border-amber-300 rounded-xl p-8 sm:p-10 text-center space-y-4">
+          <div className="w-12 h-12 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center mx-auto">
+            <Lock className="w-6 h-6" />
+          </div>
+          <div className="space-y-1.5">
+            <h2 className="text-lg font-extrabold text-slate-900">
+              আজকের ২টি ফ্রি বিশ্লেষণ শেষ হয়েছে!
+            </h2>
+            <p className="text-xs sm:text-sm text-slate-600 max-w-lg mx-auto leading-relaxed">
+              অপেক্ষা না করে এখনই আনলিমিটেড DSE ও CSE স্টক AI বিশ্লেষণ ও ৬টি Strong Buy সিগন্যাল আনলক করতে আপনার Robi &amp; Cirkle নম্বর দিয়ে সাবস্ক্রাইব করুন।
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setPaywallOpen(true)}
+            className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-blue-700 hover:bg-blue-800 text-white text-sm font-bold cursor-pointer"
+          >
+            <span>Robi &amp; Cirkle দিয়ে আনলক করুন (৳২.৭৮/দিন)</span>
+          </button>
+        </div>
+      ) : !activeQuery.symbol && !currentAnalysis ? (
         <div className="bg-white border border-slate-200 rounded-xl p-10 text-center space-y-2.5">
           <p className="text-sm font-bold text-slate-900">
             লাইভ DSE / CSE কোয়ান্টিটেটিভ বিশ্লেষণ শুরু করুন
@@ -512,7 +725,7 @@ export function AnalyzerPage() {
             উপরের সেক্টর ও কোম্পানি তালিকা থেকে যেকোনো শেয়ার বাছাই করুন অথবা ট্রেডিং কোড লিখে “বিশ্লেষণ শুরু করুন” বাটনে ক্লিক করুন।
           </p>
         </div>
-      ) : isFetching && !currentAnalysis ? (
+      ) : (isFetching || isAuthorizingQuota) && !currentAnalysis ? (
         <div className="bg-white border border-slate-200 rounded-xl p-12 text-center space-y-3">
           <div className="w-9 h-9 border-4 border-blue-700 border-t-transparent rounded-full animate-spin mx-auto" />
           <p className="text-sm font-semibold text-slate-800">{LIVE_FEED_WAITING_BN}</p>
@@ -648,6 +861,18 @@ export function AnalyzerPage() {
           </section>
         </div>
       ) : null}
+      {/* Tamper-Proof 24-Hour Free Quota Paywall Modal */}
+      <FreeQuotaPaywallModal
+        isOpen={paywallOpen}
+        resetInSeconds={liveResetSeconds}
+        requestedSymbol={
+          pendingAction?.type === 'manual'
+            ? pendingAction.payload.symbol
+            : pendingAction?.symbol || activeQuery.symbol || undefined
+        }
+        onClose={() => setPaywallOpen(false)}
+        onSubscribed={handleModalSubscribed}
+      />
     </main>
   );
 }
