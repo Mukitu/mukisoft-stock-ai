@@ -58,8 +58,8 @@ os.environ.setdefault("BDSHARE_SOURCE", "new")
 BASE_DIR = Path(__file__).resolve().parent
 DAILY_CACHE_FILE = BASE_DIR / "daily_picks_cache.json"
 AI_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
-BDAPPS_API_BASE = os.getenv("BDAPPS_API_BASE", "https://skillproof.top/stock").strip().rstrip("/")
-ALLOWED_BDAPPS_HOSTS = {"skillproof.top", "www.skillproof.top"}
+BDAPPS_API_BASE = os.getenv("BDAPPS_API_BASE", "https://stock.skillproof.top").strip().rstrip("/")
+ALLOWED_BDAPPS_HOSTS = {"stock.skillproof.top", "skillproof.top", "www.skillproof.top"}
 BD_MOBILE_REGEX = re.compile(r"^\+?8801[3-9][0-9]{8}$")
 
 SYMBOL_REGEX = re.compile(r"^[A-Z0-9&().-]{1,20}$")

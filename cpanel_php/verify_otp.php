@@ -1,7 +1,7 @@
 <?php
 /**
  * MukiSoft Stock AI — BDApps (Robi & Cirkle) OTP Verification Endpoint
- * Upload to: public_html/stock/verify_otp.php
+ * Upload to: https://stock.skillproof.top/verify_otp.php
  *
  * Accepts $_POST['Otp'] (and fallback $_POST['otp']) + $_POST['referenceNo'],
  * POSTs JSON to https://developer.bdapps.com/subscription/otp/verify, and returns

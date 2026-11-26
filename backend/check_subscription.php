@@ -1,7 +1,7 @@
 <?php
 /**
  * MukiSoft Stock AI — Hardened BDApps (Robi & Cirkle) Subscription Status Endpoint
- * Deploy to: https://skillproof.top/stock/check_subscription.php
+ * Deploy to: https://stock.skillproof.top/check_subscription.php
  *
  * Security & Compatibility Guarantees:
  * - Reads BDAPPS_APP_ID / BDAPPS_APP_PASSWORD from server environment variables or config.php (never hardcoded).

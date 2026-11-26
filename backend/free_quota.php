@@ -1,7 +1,7 @@
 <?php
 /**
  * MukiSoft AI — Optional Standalone PHP 24-Hour Free Quota Endpoint (free_quota.php)
- * Can be deployed alongside send_otp.php & verify_otp.php on skillproof.top/stock.
+ * Can be deployed alongside send_otp.php & verify_otp.php on https://stock.skillproof.top.
  * Tracks sha256(client_ip . ":" . deviceHash) in an atomic file-locked JSON store.
  */
 

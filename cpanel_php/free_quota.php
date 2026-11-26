@@ -1,7 +1,7 @@
 <?php
 /**
  * MukiSoft Stock AI — Tamper-Proof 24-Hour Free Analysis Quota Endpoint
- * Upload to: public_html/stock/free_quota.php
+ * Upload to: https://stock.skillproof.top/free_quota.php
  *
  * Enforces max 2 distinct stock analyses per 24 hours (86400s) keyed by
  * sha256(client_ip . ':' . deviceHash), persisting per-client locked JSON files

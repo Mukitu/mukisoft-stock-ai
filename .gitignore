@@ -1,10 +1,11 @@
 node_modules/
-dist/
-frontend/dist/
 .env
 .env.local
+backend/.env
 backend/__pycache__/
+backend/*.pyc
 backend/daily_picks_cache.json
 backend/free_quota_store.json
 cpanel_php/config.php
 cpanel_php/quota_store/
+.DS_Store

@@ -9,4 +9,8 @@
     </IfModule>
 </FilesMatch>
 
+<IfModule mod_alias.c>
+    RedirectMatch 403 (?i)/quota_store(/.*)?$
+</IfModule>
+
 Options -Indexes

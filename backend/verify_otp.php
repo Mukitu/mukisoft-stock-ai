@@ -1,7 +1,7 @@
 <?php
 /**
  * MukiSoft Stock AI — Hardened BDApps (Robi & Cirkle) OTP Verification Endpoint
- * Deploy to: https://skillproof.top/stock/verify_otp.php
+ * Deploy to: https://stock.skillproof.top/verify_otp.php
  *
  * Security & Compatibility Guarantees:
  * - Reads BDAPPS_APP_ID / BDAPPS_APP_PASSWORD from server environment variables or config.php (never hardcoded).

@@ -1,7 +1,7 @@
 <?php
 /**
  * MukiSoft Stock AI — BDApps (Robi & Cirkle) OTP Request Endpoint
- * Upload to: public_html/stock/send_otp.php
+ * Upload to: https://stock.skillproof.top/send_otp.php
  *
  * Accepts $_POST['user_mobile'], normalizes to tel:8801XXXXXXXXX,
  * POSTs JSON to https://developer.bdapps.com/subscription/otp/request (applicationHash: 'Stock AI').

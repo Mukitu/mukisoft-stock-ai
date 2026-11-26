@@ -1,7 +1,7 @@
 <?php
 /**
  * MukiSoft Stock AI — BDApps (Robi & Cirkle) One-Click Unsubscribe Endpoint
- * Upload to: public_html/stock/unsubscribe.php
+ * Upload to: https://stock.skillproof.top/unsubscribe.php
  *
  * Accepts $_POST['user_mobile'] or $_POST['subscriberId'], normalizes to tel:8801XXXXXXXXX,
  * POSTs JSON (action: '0', version: '1.0') to https://developer.bdapps.com/subscription/send,

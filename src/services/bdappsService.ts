@@ -5,7 +5,7 @@
  */
 
 export const BDAPPS_API_BASE = (
-  import.meta.env.VITE_BDAPPS_API_BASE || 'https://skillproof.top/stock'
+  import.meta.env.VITE_BDAPPS_API_BASE || 'https://stock.skillproof.top'
 ).replace(/\/+$/, '');
 
 export const BDAPPS_SESSION_KEY = 'ms_bdapps_session';

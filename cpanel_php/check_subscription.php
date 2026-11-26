@@ -1,7 +1,7 @@
 <?php
 /**
  * MukiSoft Stock AI — BDApps (Robi & Cirkle) Subscription Status Endpoint
- * Upload to: public_html/stock/check_subscription.php
+ * Upload to: https://stock.skillproof.top/check_subscription.php
  *
  * Accepts $_POST['user_mobile'] or $_POST['subscriberId'], normalizes to tel:8801XXXXXXXXX,
  * queries https://developer.bdapps.com/subscription/getStatus, and returns isSubscribed: true
