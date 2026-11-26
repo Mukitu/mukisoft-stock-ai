@@ -1,10 +1,10 @@
 /**
- * Vercel Edge Rewrite + Direct Render FastAPI Backend URL Resolver.
- * - On Vercel production (stock.mukisoft.tech / *.vercel.app) and AI Studio preview (*.run.app),
- *   primary requests use same-origin `/api/...` (proxied at the edge via vercel.json / vite.config.ts
- *   with zero browser CORS preflight overhead).
- * - Automatically provides direct fallback to `https://mukisoft-stock-ai.onrender.com/api/...`
- *   if a custom domain or local environment does not have the edge proxy active.
+ * Direct Render FastAPI Backend URL Resolver.
+ * - On Vercel production (stock.mukisoft.tech / www.stock.mukisoft.tech / *.vercel.app),
+ *   ALL API requests go directly to `https://mukisoft-stock-ai.onrender.com/api/...` with
+ *   full 35s timeout (bypassing Vercel Hobby's 10s edge rewrite cap and SPA HTML fallback).
+ * - In local Vite dev / AI Studio preview (*.run.app), uses Vite's same-origin `/api/...`
+ *   proxy first with automatic fallback to `https://mukisoft-stock-ai.onrender.com/api/...`.
  */
 
 export const DEFAULT_RENDER_API_BASE_URL = 'https://mukisoft-stock-ai.onrender.com';
@@ -39,7 +39,7 @@ export const DIRECT_RENDER_API_BASE_URL = resolveBackendApiBaseUrl(
   import.meta.env.VITE_API_BASE_URL
 );
 
-function shouldUseSameOriginEdgeProxy(): boolean {
+function shouldUseLocalDevProxy(): boolean {
   if (typeof window === 'undefined') {
     return false;
   }
@@ -47,9 +47,11 @@ function shouldUseSameOriginEdgeProxy(): boolean {
   if (
     host === 'stock.mukisoft.tech' ||
     host === 'www.stock.mukisoft.tech' ||
-    host.endsWith('.vercel.app') ||
-    host.endsWith('.run.app')
+    host.endsWith('.vercel.app')
   ) {
+    return false;
+  }
+  if (host.endsWith('.run.app')) {
     return true;
   }
   return Boolean(import.meta.env.DEV);
@@ -57,22 +59,25 @@ function shouldUseSameOriginEdgeProxy(): boolean {
 
 /**
  * Primary API base URL:
- * - '' (same-origin `/api/...` edge rewrite proxy on Vercel production & AI Studio preview)
- * - Direct Render URL (`https://mukisoft-stock-ai.onrender.com`) on other hosts
+ * - `https://mukisoft-stock-ai.onrender.com` directly on Vercel production (stock.mukisoft.tech)
+ * - `''` (same-origin Vite proxy `/api/...`) in local dev & AI Studio preview
  */
-export const API_BASE_URL = shouldUseSameOriginEdgeProxy()
+export const API_BASE_URL = shouldUseLocalDevProxy()
   ? ''
   : DIRECT_RENDER_API_BASE_URL;
 
 /**
  * Returns ordered candidate URLs for any `/api/...` path:
- * 1. Same-origin `/api/...` via Vercel Edge Rewrite / Vite proxy (0ms CORS preflight)
- * 2. Direct `https://mukisoft-stock-ai.onrender.com/api/...` fallback
+ * - On Vercel production (`stock.mukisoft.tech`): `[https://mukisoft-stock-ai.onrender.com/api/...]`
+ * - On local dev / AI Studio preview: `[/api/..., https://mukisoft-stock-ai.onrender.com/api/...]`
  */
 export function getApiCandidateUrls(apiPath: string): string[] {
   const normalizedPath = apiPath.startsWith('/') ? apiPath : `/${apiPath}`;
-  const primary = `${API_BASE_URL}${normalizedPath}`;
   const direct = `${DIRECT_RENDER_API_BASE_URL}${normalizedPath}`;
+  if (!API_BASE_URL) {
+    return [normalizedPath, direct];
+  }
+  const primary = `${API_BASE_URL}${normalizedPath}`;
   return primary === direct ? [direct] : [primary, direct];
 }
 

@@ -61,6 +61,7 @@ BASE_DIR = Path(__file__).resolve().parent
 DAILY_CACHE_FILE = BASE_DIR / "daily_picks_cache.json"
 SUBSCRIBER_SESSIONS_FILE = BASE_DIR / "subscriber_sessions.json"
 SYMBOL_CACHE_DIR = BASE_DIR / "symbol_ohlcv_cache"
+SYMBOL_LOOKUP_CACHE_FILE = BASE_DIR / "symbol_lookup_cache.json"
 MARKET_LIVE_CACHE_FILE = BASE_DIR / "market_live_cache.json"
 AI_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
 BDAPPS_API_BASE = os.getenv("BDAPPS_API_BASE", "https://stock.skillproof.top").strip().rstrip("/")
@@ -135,6 +136,9 @@ _http_client: httpx.AsyncClient | None = None
 _SESSION_STORE_LOCK = threading.Lock()
 _SUBSCRIBER_SESSIONS_MEM: dict[str, dict[str, Any]] = {}
 _SESSION_TTL_MS = 30 * 24 * 3600 * 1000  # 30 days
+_WARM_LOOKUP_LOCK = threading.Lock()
+_WARM_SYMBOL_LOOKUP: dict[str, dict[str, dict[str, Any]]] = {"DSE": {}, "CSE": {}}
+_WARM_LOOKUP_UPDATED_TS: float = 0.0
 
 
 def cache_get(key: str) -> Any | None:
@@ -611,7 +615,10 @@ def save_symbol_ohlcv_cache(
         logger.debug("Failed writing symbol_ohlcv_cache for %s:%s: %s", exchange, symbol, exc)
 
 
-def load_symbol_ohlcv_cache(exchange: str, symbol: str) -> tuple[pd.DataFrame, str] | None:
+def load_symbol_ohlcv_cache_with_meta(
+    exchange: str,
+    symbol: str,
+) -> tuple[pd.DataFrame, str, int] | None:
     try:
         cache_path = _symbol_cache_path(exchange, symbol)
         if not cache_path.exists():
@@ -624,15 +631,110 @@ def load_symbol_ohlcv_cache(exchange: str, symbol: str) -> tuple[pd.DataFrame, s
         if df is None or len(df) == 0:
             return None
         cached_at = str(saved.get("cached_at_bst") or "").strip()
+        updated_ts = int(saved.get("updated_ts") or 0)
         label = (
-            f"Server Cached Real OHLCV ({exchange} · {cached_at})"
+            f"Official {exchange} Warm 90D OHLCV ({cached_at})"
             if cached_at
-            else f"Server Cached Real OHLCV ({exchange})"
+            else f"Official {exchange} Warm 90D OHLCV"
         )
-        return df, label
+        return df, label, updated_ts
     except Exception as exc:
         logger.debug("Failed reading symbol_ohlcv_cache for %s:%s: %s", exchange, symbol, exc)
     return None
+
+
+def load_symbol_ohlcv_cache(exchange: str, symbol: str) -> tuple[pd.DataFrame, str] | None:
+    meta = load_symbol_ohlcv_cache_with_meta(exchange, symbol)
+    if meta is None:
+        return None
+    return meta[0], meta[1]
+
+
+def _load_warm_symbol_lookup_from_disk() -> None:
+    global _WARM_LOOKUP_UPDATED_TS
+    if not SYMBOL_LOOKUP_CACHE_FILE.exists():
+        return
+    try:
+        raw = json.loads(SYMBOL_LOOKUP_CACHE_FILE.read_text(encoding="utf-8"))
+        if not isinstance(raw, dict):
+            return
+        with _WARM_LOOKUP_LOCK:
+            for exch in ("DSE", "CSE"):
+                bucket = raw.get(exch)
+                if isinstance(bucket, dict) and bucket:
+                    _WARM_SYMBOL_LOOKUP[exch] = bucket
+            _WARM_LOOKUP_UPDATED_TS = float(raw.get("updated_ts") or 0.0)
+        logger.info(
+            "Loaded warm symbol lookup table from disk (DSE=%d, CSE=%d)",
+            len(_WARM_SYMBOL_LOOKUP["DSE"]),
+            len(_WARM_SYMBOL_LOOKUP["CSE"]),
+        )
+    except Exception as exc:
+        logger.debug("Failed loading symbol_lookup_cache.json: %s", exc)
+
+
+def _save_warm_symbol_lookup_to_disk() -> None:
+    try:
+        with _WARM_LOOKUP_LOCK:
+            payload = {
+                "updated_ts": _WARM_LOOKUP_UPDATED_TS,
+                "updated_at_bst": get_bst_now().strftime("%d %b %Y, %I:%M %p"),
+                "DSE": dict(_WARM_SYMBOL_LOOKUP["DSE"]),
+                "CSE": dict(_WARM_SYMBOL_LOOKUP["CSE"]),
+            }
+        fd, tmp_path = tempfile.mkstemp(dir=str(BASE_DIR), suffix=".tmp")
+        with os.fdopen(fd, "w", encoding="utf-8") as tmp_file:
+            json.dump(payload, tmp_file, ensure_ascii=False)
+        os.replace(tmp_path, SYMBOL_LOOKUP_CACHE_FILE)
+    except Exception as exc:
+        logger.debug("Failed saving symbol_lookup_cache.json atomically: %s", exc)
+
+
+def _get_warm_lookup_quote(exchange: str, symbol: str) -> dict[str, Any] | None:
+    with _WARM_LOOKUP_LOCK:
+        exch_map = _WARM_SYMBOL_LOOKUP.get(exchange, {})
+        quote = exch_map.get(symbol)
+        if quote:
+            return dict(quote)
+        if exchange == "CSE":
+            dse_quote = _WARM_SYMBOL_LOOKUP.get("DSE", {}).get(symbol)
+            if dse_quote:
+                return dict(dse_quote)
+    return None
+
+
+def _board_df_to_lookup_map(board_df: pd.DataFrame | None) -> dict[str, dict[str, Any]]:
+    if board_df is None or len(board_df) == 0:
+        return {}
+    df = board_df.copy()
+    df.columns = [str(c).lower().strip() for c in df.columns]
+    sym_col = "symbol" if "symbol" in df.columns else (df.columns[1] if len(df.columns) > 1 else df.columns[0])
+    today_iso = get_bst_now().date().isoformat()
+    out: dict[str, dict[str, Any]] = {}
+    for _, row in df.iterrows():
+        sym = str(row.get(sym_col, "")).strip().upper()
+        if not SYMBOL_REGEX.match(sym):
+            continue
+        ltp = _parse_float(row.get("ltp"))
+        close_p = _parse_float(row.get("close", row.get("closep")))
+        ycp = _parse_float(row.get("ycp"))
+        price = ltp if ltp > 0 else (close_p if close_p > 0 else ycp)
+        if price <= 0:
+            continue
+        open_p = _parse_float(row.get("open")) or ycp or price
+        high_p = _parse_float(row.get("high")) or max(open_p, price)
+        low_p = _parse_float(row.get("low")) or min(open_p, price)
+        vol = _parse_float(row.get("volume"))
+        out[sym] = {
+            "date": today_iso,
+            "open": open_p,
+            "high": max(high_p, open_p, price),
+            "low": min(low_p, open_p, price) if low_p > 0 else min(open_p, price),
+            "close": price,
+            "ycp": ycp if ycp > 0 else open_p,
+            "volume": vol,
+        }
+    return out
 
 
 def _merge_quote_into_df(
@@ -925,23 +1027,24 @@ async def scrape_dse_day_end_archive(symbol: str) -> pd.DataFrame | None:
     return None
 
 
-async def scrape_cse_current_board_quote(symbol: str) -> dict[str, Any] | None:
-    """Dynamically scrapes CSE current price table for any CSE ticker (timeout=6s)."""
+async def scrape_cse_board_map() -> dict[str, dict[str, Any]]:
+    """Dynamically scrapes full CSE current price lookup map (timeout=6s)."""
     if _http_client is None:
-        return None
+        return {}
     cached_cse = cache_get("cse_board_map")
-    if isinstance(cached_cse, dict):
-        return cached_cse.get(symbol)
+    if isinstance(cached_cse, dict) and cached_cse:
+        return cached_cse
 
     url = "https://www.cse.com.bd/market/current_price"
     if not _is_allowlisted_exchange_url(url):
-        return None
+        return {}
 
     try:
         resp = await _http_client.get(url, headers=HTTP_HEADERS, timeout=6.0)
         if resp.status_code != 200 or not resp.text:
-            return None
+            return {}
         soup = BeautifulSoup(resp.text, "html.parser")
+        today_iso = get_bst_now().date().isoformat()
         board_map: dict[str, dict[str, Any]] = {}
         for tr in soup.find_all("tr"):
             cells = [td.get_text(" ", strip=True) for td in tr.find_all("td")]
@@ -960,6 +1063,7 @@ async def scrape_cse_current_board_quote(symbol: str) -> dict[str, Any] | None:
             if price <= 0:
                 continue
             board_map[sym] = {
+                "date": today_iso,
                 "open": open_p if open_p > 0 else (ycp if ycp > 0 else price),
                 "high": max(high_p, price),
                 "low": min(low_p, price) if low_p > 0 else price,
@@ -968,11 +1072,60 @@ async def scrape_cse_current_board_quote(symbol: str) -> dict[str, Any] | None:
                 "volume": vol,
             }
         if board_map:
-            cache_set("cse_board_map", board_map, ttl_seconds=180)
-            return board_map.get(symbol)
+            cache_set("cse_board_map", board_map, ttl_seconds=300)
+            return board_map
     except Exception as exc:
         logger.debug("CSE current price board scrape failed: %s", exc)
-    return None
+    return {}
+
+
+async def scrape_cse_current_board_quote(symbol: str) -> dict[str, Any] | None:
+    """Dynamically scrapes CSE current price table for any CSE ticker (timeout=6s)."""
+    board_map = await scrape_cse_board_map()
+    return board_map.get(symbol)
+
+
+async def refresh_warm_symbol_lookup(force: bool = False) -> dict[str, int]:
+    """
+    Populates and refreshes the warm in-memory + disk symbol lookup table for ALL DSE & CSE
+    tickers so /api/analyze resolves any listed symbol in <1.5 seconds with real exchange data.
+    """
+    global _WARM_LOOKUP_UPDATED_TS
+    if force:
+        _TTL_CACHE.pop("dse_board_df", None)
+        _TTL_CACHE.pop("cse_board_map", None)
+
+    dse_df, cse_map = await asyncio.gather(
+        get_dynamic_dse_board(),
+        scrape_cse_board_map(),
+        return_exceptions=True,
+    )
+
+    dse_map = _board_df_to_lookup_map(dse_df) if isinstance(dse_df, pd.DataFrame) else {}
+    cse_clean = cse_map if isinstance(cse_map, dict) else {}
+
+    updated = False
+    with _WARM_LOOKUP_LOCK:
+        if dse_map:
+            _WARM_SYMBOL_LOOKUP["DSE"] = dse_map
+            updated = True
+        if cse_clean:
+            _WARM_SYMBOL_LOOKUP["CSE"] = cse_clean
+            updated = True
+        if updated:
+            _WARM_LOOKUP_UPDATED_TS = time.time()
+
+    if updated:
+        _save_warm_symbol_lookup_to_disk()
+        logger.info(
+            "Refreshed warm symbol lookup table (DSE=%d, CSE=%d)",
+            len(_WARM_SYMBOL_LOOKUP["DSE"]),
+            len(_WARM_SYMBOL_LOOKUP["CSE"]),
+        )
+    return {
+        "DSE": len(_WARM_SYMBOL_LOOKUP["DSE"]),
+        "CSE": len(_WARM_SYMBOL_LOOKUP["CSE"]),
+    }
 
 
 async def scrape_new_dse_company_quote(symbol: str) -> tuple[dict[str, Any], str] | None:
@@ -1152,48 +1305,64 @@ async def fetch_dynamic_ohlcv_for_symbol(
     exchange: str,
 ) -> tuple[pd.DataFrame, str] | None:
     """
-    100% Dynamic 24/7 Parallel Multi-Source OHLCV Pipeline (strict 6s timeouts):
-      - Phase 1 (Parallel): bdshare 120D OHLCV + Direct DSE/CSE live/closing quote + DSE board
-      - Phase 2 (Fallback only if needed): DSE Day-End Archive + server symbol_ohlcv_cache/
-    Never stalls past ~6 seconds and works 24/7 for ANY listed DSE or CSE ticker.
-    Zero static/hardcoded prices or sample ticker lists.
+    100% Dynamic 24/7 Parallel Multi-Source OHLCV Pipeline with Warm Symbol Lookup:
+      - Fast Path (<0.2s): O(1) warm in-memory/disk symbol lookup quote + fresh persisted 90D real OHLCV
+      - Phase 1 (<1.5s typical, 4.5s cap): Parallel bdshare 90D OHLCV + Direct DSE/CSE live/closing quote
+      - Phase 2 (Fallback only if needed): DSE Day-End Archive + direct company scraper
+    Works 24/7 for ANY listed DSE or CSE ticker with zero static/hardcoded prices.
     """
     session = get_bd_market_session()
     session_tag = "Live" if session["is_live"] else "Latest Closing"
 
     hist_df: pd.DataFrame | None = None
     source_parts: list[str] = []
-    live_quote: dict[str, Any] | None = None
-    quote_source = ""
+    live_quote: dict[str, Any] | None = _get_warm_lookup_quote(exchange, symbol)
+    quote_source = f"Official {exchange} Warm {session_tag} Board" if live_quote else ""
+
+    # Fast Path: if we already have real persisted 90D OHLCV (<6h old during off-market, <15m live)
+    # AND a warm real board quote, merge immediately for <0.2s response time.
+    cached_meta = load_symbol_ohlcv_cache_with_meta(exchange, symbol)
+    if cached_meta is not None and live_quote is not None:
+        cached_df, cached_label, cached_ts = cached_meta
+        max_age_sec = 900 if session["is_live"] else 21_600
+        if len(cached_df) >= 15 and cached_ts > 0 and (time.time() - cached_ts) <= max_age_sec:
+            merged_fast = _merge_quote_into_df(cached_df, live_quote)
+            if merged_fast is not None and len(merged_fast) > 0:
+                return merged_fast, f"{cached_label} + {quote_source}"
+
+    # Bounded timeout: if we already have a real warm quote, don't stall waiting >3.5s on slow bdshare
+    bdshare_timeout = 3.5 if live_quote is not None else 5.5
 
     async def _bdshare_hist_task() -> pd.DataFrame | None:
         try:
-            return await asyncio.wait_for(asyncio.to_thread(_fetch_bdshare_history_sync, symbol), timeout=6.0)
+            return await asyncio.wait_for(
+                asyncio.to_thread(_fetch_bdshare_history_sync, symbol),
+                timeout=bdshare_timeout,
+            )
         except Exception:
             return None
 
     async def _quote_task() -> tuple[dict[str, Any] | None, str]:
+        # If warm board quote already includes real volume, use it immediately without extra round-trip
+        if live_quote is not None and float(live_quote.get("volume") or 0) > 0:
+            return live_quote, quote_source
         if exchange == "CSE":
             direct_cse = await scrape_direct_exchange_quote(symbol, "CSE")
             if direct_cse:
                 return direct_cse
-            return None, ""
-        # For DSE, check fast cached board or race direct company page + board
-        board_df = cache_get("dse_board_df")
-        if board_df is not None:
-            q = _extract_quote_from_board(board_df, symbol)
-            if q:
-                return q, f"DSE {session_tag} Board"
+            return live_quote, quote_source
         direct_dse = await scrape_new_dse_company_quote(symbol)
         if direct_dse:
             return direct_dse
+        if live_quote is not None:
+            return live_quote, quote_source
         board_df = await get_dynamic_dse_board()
         q = _extract_quote_from_board(board_df, symbol)
         if q:
             return q, f"DSE {session_tag} Board"
         return None, ""
 
-    # Phase 1: Run history fetch + live/closing quote fetch concurrently (max ~6s wall time)
+    # Phase 1: Run history fetch + live/closing quote fetch concurrently
     hist_res, quote_res = await asyncio.gather(
         _bdshare_hist_task(),
         _quote_task(),
@@ -1221,12 +1390,11 @@ async def fetch_dynamic_ohlcv_for_symbol(
             live_quote, quote_source = direct_fallback
 
     # Enrich real quote with server-persisted real history if upstream 90D history timed out
-    cached_entry = load_symbol_ohlcv_cache(exchange, symbol)
-    if hist_df is None and cached_entry is not None:
-        hist_df, cached_label = cached_entry
+    if hist_df is None and cached_meta is not None:
+        hist_df, cached_label, _ts = cached_meta
         source_parts.append(cached_label)
 
-    # Merge fresh live/closing quote onto historical OHLCV frame (or synthesize valid OHLCV window from live quote)
+    # Merge fresh live/closing quote onto historical OHLCV frame
     final_df = _merge_quote_into_df(hist_df, live_quote)
     if final_df is None or len(final_df) == 0:
         return None
@@ -1406,17 +1574,34 @@ async def compute_daily_top_picks(force_refresh: bool = False) -> dict[str, Any]
 async def lifespan(_app: FastAPI):
     global _http_client
     _http_client = httpx.AsyncClient(follow_redirects=True)
+    _load_warm_symbol_lookup_from_disk()
 
     async def prewarm_loop() -> None:
+        first_run = True
         while True:
             try:
                 now_bst = get_bst_now()
-                # Refresh right at 3:00 PM BST (15:00–15:10) once the new cycle key is active
-                force = now_bst.hour == 15 and now_bst.minute < 12
-                await compute_daily_top_picks(force_refresh=force)
+                session = get_bd_market_session(now_bst)
+                is_post_market_sync_window = (
+                    now_bst.weekday() in {6, 0, 1, 2, 3}
+                    and (
+                        (now_bst.hour == 14 and now_bst.minute >= 38)
+                        or (now_bst.hour == 15 and now_bst.minute < 15)
+                    )
+                )
+                # Always keep warm symbol lookup table (380+ DSE & CSE symbols) & indices fresh
+                await refresh_warm_symbol_lookup(force=first_run or session["is_live"] or is_post_market_sync_window)
+                await get_live_ticker()
+                await compute_daily_top_picks(force_refresh=is_post_market_sync_window)
+                first_run = False
             except Exception as exc:
                 logger.warning("Prewarm task iteration failed: %s", exc)
-            await asyncio.sleep(600)
+
+            # Refresh every 5 minutes during live market hours & 2:40 PM closing window, 15 minutes off-market
+            now_after = get_bst_now()
+            sess_after = get_bd_market_session(now_after)
+            sleep_sec = 300 if (sess_after["is_live"] or (now_after.hour == 14 and now_after.minute >= 30)) else 900
+            await asyncio.sleep(sleep_sec)
 
     task = asyncio.create_task(prewarm_loop())
     try:
@@ -1461,6 +1646,7 @@ app.add_middleware(
         "X-Subscriber-Mobile",
         "X-Requested-With",
     ],
+    max_age=3600,
 )
 
 

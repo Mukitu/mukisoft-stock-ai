@@ -590,8 +590,9 @@ export async function analyzeStock(symbol: string, exchange: Exchange): Promise<
   ]);
 
   const apiPath = `/api/analyze?symbol=${encodeURIComponent(cleanSym)}&exchange=${encodeURIComponent(exchange)}`;
-  // If we already have a pre-computed edge ML analysis for this symbol, bound live upstream wait to 5 seconds
-  const perAttemptTimeout = edgeCached ? 5_000 : 12_000;
+  // Allow full 35s for direct Render scraping/XGBoost computation (bypassing Vercel's 10s edge rewrite limit).
+  // Symbols already present in /assets/ml_analysis_cache.json render instantaneously via useStockAnalysis while refreshing live.
+  const perAttemptTimeout = edgeCached ? 15_000 : 35_000;
 
   let res: Response;
   try {
