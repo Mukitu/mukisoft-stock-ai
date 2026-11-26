@@ -6,7 +6,8 @@
 
 import { getApiCandidateUrls } from '../utils/apiBaseUrl';
 
-const DEFAULT_BDAPPS_API_BASE = 'https://stock.skillproof.top';
+const DEFAULT_BDAPPS_API_BASE = 'https://www.stock.skillproof.top';
+const FALLBACK_BDAPPS_API_BASE = 'https://stock.skillproof.top';
 
 export function resolveBdappsApiBase(rawEnv?: string): string {
   const candidate = String(rawEnv ?? '').trim().replace(/\/+$/, '');
@@ -29,13 +30,25 @@ export function resolveBdappsApiBase(rawEnv?: string): string {
     ) {
       return DEFAULT_BDAPPS_API_BASE;
     }
-    return parsed.origin + parsed.pathname.replace(/\/+$/, '');
+    const cleanPath = parsed.pathname.replace(/\/+$/, '');
+    // Prefer www.stock.skillproof.top when stock.skillproof.top is configured,
+    // because stock.skillproof.top has intermittent NXDOMAIN on public DNS resolvers
+    // while www.stock.skillproof.top resolves cleanly with the same SSL SAN & PHP root.
+    if (hostname === 'stock.skillproof.top') {
+      return `${DEFAULT_BDAPPS_API_BASE}${cleanPath}`;
+    }
+    return parsed.origin + cleanPath;
   } catch {
     return DEFAULT_BDAPPS_API_BASE;
   }
 }
 
 export const BDAPPS_API_BASE = resolveBdappsApiBase(import.meta.env.VITE_BDAPPS_API_BASE);
+
+export function getBdappsBaseCandidates(): string[] {
+  const candidates = [BDAPPS_API_BASE, DEFAULT_BDAPPS_API_BASE, FALLBACK_BDAPPS_API_BASE];
+  return Array.from(new Set(candidates.map((u) => u.replace(/\/+$/, '')).filter(Boolean)));
+}
 
 export const BDAPPS_SESSION_KEY = 'ms_bdapps_session';
 export const BDAPPS_MSISDN_KEY = 'ms_bdapps_msisdn';
@@ -660,66 +673,68 @@ async function postFormEndpoint(
 ): Promise<BdappsApiResponse> {
   const cleanScript = endpoint.split('?')[0];
   const relayPath = BDAPPS_RELAY_PATH_MAP[cleanScript];
-  const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+  const baseCandidates = getBdappsBaseCandidates();
+  const bodyString = new URLSearchParams(fields).toString();
   let directTimedOut = false;
 
-  try {
-    const body = new URLSearchParams(fields);
-    const res = await fetch(`${BDAPPS_API_BASE}/${endpoint}`, {
-      ...fetchOptions,
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
-        Accept: 'application/json, text/plain, */*',
-      },
-      body: body.toString(),
-      signal: controller.signal,
-    });
+  for (const baseUrl of baseCandidates) {
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), timeoutMs);
 
-    const text = await res.text();
-    const { parsed, isJson } = parseBdappsResponseText(text, res);
+    try {
+      const res = await fetch(`${baseUrl}/${endpoint}`, {
+        ...fetchOptions,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
+          Accept: 'application/json, text/plain, */*',
+        },
+        body: bodyString,
+        signal: controller.signal,
+      });
 
-    // If direct cPanel PHP returned a 5xx gateway error or non-JSON HTML, retry via Render relay
-    if (relayPath && (!isJson || res.status >= 500)) {
-      try {
-        return await postViaRenderRelay(relayPath, fields, Math.max(timeoutMs, 22_000));
-      } catch {
-        // Fall through to return direct payload if JSON, or throw below
+      const text = await res.text();
+      const { parsed, isJson } = parseBdappsResponseText(text, res);
+
+      // If direct cPanel PHP returned a 5xx gateway error or non-JSON HTML, try next host / relay
+      if (!isJson || res.status >= 500) {
+        continue;
       }
-    }
 
-    parsed._httpOk = res.ok;
-    parsed._httpStatus = res.status;
+      parsed._httpOk = res.ok;
+      parsed._httpStatus = res.status;
 
-    if (!res.ok && !parsed.message && !parsed.statusDetail && !parsed.error) {
-      parsed.error = `সার্ভার থেকে সঠিক উত্তর পাওয়া যায়নি (HTTP ${res.status})।`;
-    }
-
-    return parsed;
-  } catch (err) {
-    if (err instanceof DOMException && err.name === 'AbortError') {
-      directTimedOut = true;
-    }
-
-    // Safari CORS / Load failed / ISP routing / timeout fallback -> Render server-to-server relay
-    if (relayPath) {
-      try {
-        return await postViaRenderRelay(relayPath, fields, Math.max(timeoutMs, 22_000));
-      } catch (relayErr) {
-        if (relayErr instanceof Error && relayErr.message.includes('বিডিঅ্যাপস')) {
-          throw relayErr;
-        }
+      if (!res.ok && !parsed.message && !parsed.statusDetail && !parsed.error) {
+        parsed.error = `সার্ভার থেকে সঠিক উত্তর পাওয়া যায়নি (HTTP ${res.status})।`;
       }
-    }
 
-    if (directTimedOut) {
-      throw new Error('বিডিঅ্যাপস সার্ভার সাড়া দিতে সময় নিচ্ছে। অনুগ্রহ করে আবার চেষ্টা করুন।');
+      return parsed;
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        directTimedOut = true;
+        break;
+      }
+      // Network / DNS / CORS failure on this host -> try next candidate host
+    } finally {
+      window.clearTimeout(timer);
     }
-    throw new Error('বিডিঅ্যাপস সার্ভারের সাথে সংযোগ স্থাপন করা যায়নি। ইন্টারনেট সংযোগ যাচাই করে আবার চেষ্টা করুন।');
-  } finally {
-    window.clearTimeout(timer);
   }
+
+  // Safari CORS / Load failed / DNS / ISP routing / timeout fallback -> Render server-to-server relay
+  if (relayPath) {
+    try {
+      return await postViaRenderRelay(relayPath, fields, Math.max(timeoutMs, 22_000));
+    } catch (relayErr) {
+      if (relayErr instanceof Error && relayErr.message.includes('বিডিঅ্যাপস')) {
+        throw relayErr;
+      }
+    }
+  }
+
+  if (directTimedOut) {
+    throw new Error('বিডিঅ্যাপস সার্ভার সাড়া দিতে সময় নিচ্ছে। অনুগ্রহ করে আবার চেষ্টা করুন।');
+  }
+  throw new Error('বিডিঅ্যাপস সার্ভারের সাথে সংযোগ স্থাপন করা যায়নি। ইন্টারনেট সংযোগ যাচাই করে আবার চেষ্টা করুন।');
 }
 
 /**

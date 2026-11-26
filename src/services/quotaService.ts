@@ -15,9 +15,15 @@ export const QUOTA_WINDOW_SECONDS = 86_400; // 24 hours
 export const QUOTA_STORAGE_KEY = 'ms_free_quota_state_v1';
 export const QUOTA_UPDATED_EVENT = 'ms-free-quota-updated';
 
-export const QUOTA_ENDPOINT_URL = (
-  import.meta.env.VITE_QUOTA_API_URL || `${BDAPPS_API_BASE}/free_quota.php`
-).trim();
+function resolveQuotaEndpointUrl(rawEnvUrl?: string): string {
+  const candidate = String(rawEnvUrl || '').trim();
+  if (!candidate) {
+    return `${BDAPPS_API_BASE}/free_quota.php`;
+  }
+  return candidate.replace(/^https?:\/\/stock\.skillproof\.top(?=\/|$)/i, 'https://www.stock.skillproof.top');
+}
+
+export const QUOTA_ENDPOINT_URL = resolveQuotaEndpointUrl(import.meta.env.VITE_QUOTA_API_URL);
 
 const FALLBACK_QUOTA_ENDPOINT_URL = `${DEFAULT_API_BASE}/api/free-quota`;
 

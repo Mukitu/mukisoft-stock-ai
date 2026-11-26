@@ -69,8 +69,8 @@ WARM_BOARD_CACHE_FILE = BASE_DIR / "warm_board_cache.json"
 LEGACY_SYMBOL_LOOKUP_CACHE_FILE = BASE_DIR / "symbol_lookup_cache.json"
 MARKET_LIVE_CACHE_FILE = BASE_DIR / "market_live_cache.json"
 AI_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
-BDAPPS_API_BASE = os.getenv("BDAPPS_API_BASE", "https://stock.skillproof.top").strip().rstrip("/")
-ALLOWED_BDAPPS_HOSTS = {"stock.skillproof.top", "skillproof.top", "www.skillproof.top"}
+BDAPPS_API_BASE = os.getenv("BDAPPS_API_BASE", "https://www.stock.skillproof.top").strip().rstrip("/")
+ALLOWED_BDAPPS_HOSTS = {"www.stock.skillproof.top", "stock.skillproof.top", "skillproof.top", "www.skillproof.top"}
 ALLOWED_EXCHANGE_HOSTS = {"www.dsebd.org", "dsebd.org", "www.cse.com.bd", "cse.com.bd"}
 BD_MOBILE_REGEX = re.compile(r"^\+?8801[3-9][0-9]{8}$")
 SESSION_TOKEN_REGEX = re.compile(r"^[A-Za-z0-9_-]{8,128}$")
@@ -299,6 +299,21 @@ def _save_session_store_unlocked(store: dict[str, dict[str, Any]]) -> None:
         logger.warning("Failed persisting subscriber sessions atomically: %s", exc)
 
 
+def _get_bdapps_base_candidates() -> list[str]:
+    parsed_base = urlparse(BDAPPS_API_BASE)
+    hostname = (parsed_base.hostname or "").lower()
+    if parsed_base.scheme != "https" or hostname not in ALLOWED_BDAPPS_HOSTS:
+        return []
+
+    candidates: list[str] = []
+    if hostname in {"stock.skillproof.top", "www.stock.skillproof.top"}:
+        candidates.append("https://www.stock.skillproof.top")
+        candidates.append("https://stock.skillproof.top")
+    else:
+        candidates.append(BDAPPS_API_BASE)
+    return list(dict.fromkeys(candidates))
+
+
 async def _check_bdapps_status_detailed(
     subscriber_id: str | None,
     mobile: str | None,
@@ -317,41 +332,42 @@ async def _check_bdapps_status_detailed(
         if cached is not None:
             return bool(cached), "REGISTERED" if cached else "UNREGISTERED"
 
-    parsed_base = urlparse(BDAPPS_API_BASE)
-    if parsed_base.scheme != "https" or (parsed_base.hostname or "").lower() not in ALLOWED_BDAPPS_HOSTS:
+    candidates = _get_bdapps_base_candidates()
+    if not candidates:
         logger.warning("Blocked unallowlisted BDAPPS_API_BASE host: %s", BDAPPS_API_BASE)
         return None, "UNALLOWLISTED"
 
     if _http_client is None:
         return None, "NO_CLIENT"
 
-    try:
-        resp = await _http_client.post(
-            f"{BDAPPS_API_BASE}/check_subscription.php",
-            data={"user_mobile": normalized_mobile},
-            headers={"Accept": "application/json, text/plain, */*"},
-            timeout=UPSTREAM_HTTP_TIMEOUT,
-        )
-        if resp.status_code == 200:
-            payload = resp.json()
-            raw_status = str(payload.get("subscriptionStatus", "")).strip().upper()
-            status = re.sub(r"\s+", " ", re.sub(r"[_-]+", " ", raw_status))
-            code = str(payload.get("statusCode", "")).strip().upper()
-            is_active = bool(
-                payload.get("isSubscribed") is True
-                or status in {"REGISTERED", "INITIAL CHARGING PENDING", "PENDING"}
-                or code == "E1351"
-                or (
-                    payload.get("success") is True
-                    and code == "S1000"
-                    and status not in {"UNREGISTERED", "DEREGISTERED", "EXPIRED"}
-                    and payload.get("isSubscribed") is not False
-                )
+    for base_url in candidates:
+        try:
+            resp = await _http_client.post(
+                f"{base_url}/check_subscription.php?_t={int(time.time() * 1000)}",
+                data={"user_mobile": normalized_mobile},
+                headers={"Accept": "application/json, text/plain, */*"},
+                timeout=UPSTREAM_HTTP_TIMEOUT,
             )
-            cache_set(cache_key, is_active, ttl_seconds=300 if is_active else 30)
-            return is_active, status or ("REGISTERED" if is_active else "UNREGISTERED")
-    except Exception as exc:
-        logger.warning("BDApps subscriber verification skipped due to network error: %s", exc)
+            if resp.status_code == 200:
+                payload = resp.json()
+                raw_status = str(payload.get("subscriptionStatus", "")).strip().upper()
+                status = re.sub(r"\s+", " ", re.sub(r"[_-]+", " ", raw_status))
+                code = str(payload.get("statusCode", "")).strip().upper()
+                is_active = bool(
+                    payload.get("isSubscribed") is True
+                    or status in {"REGISTERED", "INITIAL CHARGING PENDING", "PENDING"}
+                    or code == "E1351"
+                    or (
+                        payload.get("success") is True
+                        and code == "S1000"
+                        and status not in {"UNREGISTERED", "DEREGISTERED", "EXPIRED"}
+                        and payload.get("isSubscribed") is not False
+                    )
+                )
+                cache_set(cache_key, is_active, ttl_seconds=300 if is_active else 30)
+                return is_active, status or ("REGISTERED" if is_active else "UNREGISTERED")
+        except Exception as exc:
+            logger.warning("BDApps subscriber verification error on %s: %s", base_url, exc)
     return None, "NETWORK_ERROR"
 
 
@@ -2355,8 +2371,8 @@ async def _relay_to_bdapps_php(endpoint_key: str, payload: BdappsRelayRequest) -
     if not php_file:
         raise HTTPException(status_code=400, detail="Unsupported BDApps relay action.")
 
-    parsed_base = urlparse(BDAPPS_API_BASE)
-    if parsed_base.scheme != "https" or (parsed_base.hostname or "").lower() not in ALLOWED_BDAPPS_HOSTS:
+    candidates = _get_bdapps_base_candidates()
+    if not candidates:
         raise HTTPException(status_code=502, detail="BDApps relay host is not allowlisted.")
 
     if _http_client is None:
@@ -2383,39 +2399,46 @@ async def _relay_to_bdapps_php(endpoint_key: str, payload: BdappsRelayRequest) -
         if user_mobile:
             form_fields["user_mobile"] = user_mobile
 
-    target_url = f"{BDAPPS_API_BASE}/{php_file}"
-    if php_file == "check_subscription.php":
-        target_url = f"{target_url}?_t={int(time.time() * 1000)}"
+    last_exc: Exception | None = None
+    last_status = 502
+    for base_url in candidates:
+        target_url = f"{base_url}/{php_file}"
+        if php_file == "check_subscription.php":
+            target_url = f"{target_url}?_t={int(time.time() * 1000)}"
 
-    try:
-        resp = await _http_client.post(
-            target_url,
-            data=form_fields,
-            headers={"Accept": "application/json, text/plain, */*"},
-            timeout=BDAPPS_RELAY_TIMEOUT,
-        )
         try:
-            body = resp.json()
-            if isinstance(body, dict):
-                return JSONResponse(status_code=resp.status_code, content=body)
-        except Exception:
-            pass
+            resp = await _http_client.post(
+                target_url,
+                data=form_fields,
+                headers={"Accept": "application/json, text/plain, */*"},
+                timeout=BDAPPS_RELAY_TIMEOUT,
+            )
+            last_status = resp.status_code
+            try:
+                body = resp.json()
+                if isinstance(body, dict):
+                    return JSONResponse(status_code=resp.status_code, content=body)
+            except Exception:
+                pass
+        except Exception as exc:
+            last_exc = exc
+            logger.warning("BDApps server-to-server relay failed for %s on %s: %s", php_file, base_url, exc)
+
+    if last_exc is None:
         return JSONResponse(
-            status_code=resp.status_code if resp.status_code >= 400 else 502,
+            status_code=last_status if last_status >= 400 else 502,
             content={
                 "success": False,
                 "error": "BDApps PHP relay returned an invalid response.",
             },
         )
-    except Exception as exc:
-        logger.warning("BDApps server-to-server relay failed for %s: %s", php_file, exc)
-        return JSONResponse(
-            status_code=502,
-            content={
-                "success": False,
-                "error": "বিডিঅ্যাপস গেটওয়ে সাময়িকভাবে সাড়া দিচ্ছে না। কিছুক্ষণ পর আবার চেষ্টা করুন।",
-            },
-        )
+    return JSONResponse(
+        status_code=502,
+        content={
+            "success": False,
+            "error": "বিডিঅ্যাপস গেটওয়ে সাময়িকভাবে সাড়া দিচ্ছে না। কিছুক্ষণ পর আবার চেষ্টা করুন।",
+        },
+    )
 
 
 @app.post("/api/bdapps/check")
