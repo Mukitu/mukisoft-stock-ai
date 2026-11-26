@@ -1,0 +1,49 @@
+name: Post-Market ML Analysis & Edge Snapshot Sync
+
+on:
+  schedule:
+    - cron: '40 8 * * 0,1,2,3,4' # 08:40 UTC = 2:40 PM BST (Sun–Thu right after DSE/CSE close)
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: post-market-ml-sync
+  cancel-in-progress: false
+
+jobs:
+  ml-snapshot-sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: 'backend/requirements.txt'
+
+      - name: Install backend ML dependencies
+        run: pip install -r backend/requirements.txt
+
+      - name: Run 17-feature XGBoost + 20-indicator Post-Market Sync
+        run: python3 scripts/generate_daily_picks.py
+
+      - name: Commit & push updated edge JSON snapshots to main
+        run: |
+          git config user.name "MukiSoft AI Bot"
+          git config user.email "bot@mukisoft.tech"
+          git add public/assets/market_snapshot.json public/assets/ml_analysis_cache.json public/assets/daily_picks.json
+          if git diff --staged --quiet; then
+            echo "No snapshot changes to commit."
+          else
+            git commit -m "chore(ml-sync): update post-market DSE/CSE ML snapshots"
+            git pull --rebase origin main
+            git push origin HEAD:main
+          fi

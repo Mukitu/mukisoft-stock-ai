@@ -94,6 +94,7 @@ export function AnalyzerPage() {
   const {
     data: liveAnalysis,
     isFetching,
+    isLiveRefreshing,
     isError,
     error: queryError,
     failureCount,
@@ -836,8 +837,16 @@ export function AnalyzerPage() {
         <div className="space-y-6">
           {/* Action Toolbar */}
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="text-xs text-slate-500">
-              উৎস: <strong className="text-slate-800">{currentAnalysis.data_source}</strong>
+            <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+              <span>
+                উৎস: <strong className="text-slate-800">{currentAnalysis.data_source}</strong>
+              </span>
+              {isLiveRefreshing && (
+                <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-blue-700 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-md">
+                  <RefreshCw className="w-3 h-3 animate-spin" />
+                  <span>লাইভ আপডেট সিঙ্ক হচ্ছে...</span>
+                </span>
+              )}
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <Link

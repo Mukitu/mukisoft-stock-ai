@@ -1,0 +1,38 @@
+name: 24/7 Render Always-Awake Keep-Alive
+
+on:
+  schedule:
+    - cron: '*/10 * * * *' # Runs every 10 minutes, 24/7, so Render free instance never sleeps
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: render-keep-alive
+  cancel-in-progress: true
+
+jobs:
+  keep-alive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Ping Render /api/market-live
+        run: |
+          echo "Pinging /api/market-live at $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          HTTP_CODE=$(curl -sS -o /tmp/market_live.json -w "%{http_code}" --max-time 25 --retry 2 --retry-delay 3 \
+            "https://mukisoft-stock-ai.onrender.com/api/market-live")
+          echo "HTTP Status: ${HTTP_CODE}"
+          head -c 300 /tmp/market_live.json || true
+          echo ""
+          test "${HTTP_CODE}" -eq 200
+
+      - name: Ping Render /api/top-picks
+        run: |
+          echo "Pinging /api/top-picks at $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          HTTP_CODE=$(curl -sS -o /tmp/top_picks.json -w "%{http_code}" --max-time 35 --retry 1 --retry-delay 3 \
+            "https://mukisoft-stock-ai.onrender.com/api/top-picks")
+          echo "HTTP Status: ${HTTP_CODE}"
+          head -c 300 /tmp/top_picks.json || true
+          echo ""
+          test "${HTTP_CODE}" -eq 200

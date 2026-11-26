@@ -151,10 +151,154 @@ function sanitizeVerifiedTopPicks(rawPicks: unknown): TopPick[] {
   return valid.slice(0, 6);
 }
 
+export const MARKET_LIVE_CACHE_KEY = 'ms_market_live_cache_v2';
+
+export interface MarketEdgeSnapshot {
+  schema_version: number;
+  generated_at_bst: string;
+  trading_date: string;
+  market_status: string;
+  indices: {
+    dsex: string;
+    dsex_change?: number;
+    dsex_change_pct?: number;
+    ds30: string;
+    ds30_change?: number;
+    ds30_change_pct?: number;
+    dses?: string;
+  };
+  picks: TopPick[];
+}
+
+interface MlAnalysisEdgeCache {
+  schema_version: number;
+  generated_at_bst: string;
+  trading_date: string;
+  analyses: Record<string, Record<string, unknown>>;
+}
+
+let _marketSnapshotPromise: Promise<MarketEdgeSnapshot | null> | null = null;
+let _mlCachePromise: Promise<MlAnalysisEdgeCache | null> | null = null;
+
+function formatValidatedIndex(raw: unknown, minVal: number, maxVal: number): string | null {
+  const str = String(raw ?? '').trim();
+  if (!str || str === '—') return null;
+  const num = Number(str.replace(/,/g, ''));
+  if (!Number.isFinite(num) || num < minVal || num > maxVal) return null;
+  return num.toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+export async function loadMarketSnapshot(force = false): Promise<MarketEdgeSnapshot | null> {
+  if (!force && _marketSnapshotPromise) {
+    return _marketSnapshotPromise;
+  }
+
+  const promise = (async () => {
+    try {
+      const res = await fetchWithTimeout(
+        `/assets/market_snapshot.json?cycle=${encodeURIComponent(getBstCycleStamp())}`,
+        { cache: 'no-store' },
+        4_000
+      );
+      if (!res.ok) return null;
+      const json = (await res.json()) as Partial<MarketEdgeSnapshot> | null;
+      if (!json || typeof json !== 'object' || Number(json.schema_version) < 2) {
+        return null;
+      }
+      const dsex = formatValidatedIndex(json.indices?.dsex, 1000, 25000) || '';
+      const ds30 = formatValidatedIndex(json.indices?.ds30, 400, 12000) || '—';
+      const picks = sanitizeVerifiedTopPicks(json.picks);
+      return {
+        schema_version: Number(json.schema_version),
+        generated_at_bst: String(json.generated_at_bst || getBDMarketSession().bd_time),
+        trading_date: String(json.trading_date || ''),
+        market_status: String(json.market_status || 'closing'),
+        indices: {
+          dsex,
+          dsex_change: Number(json.indices?.dsex_change ?? 0),
+          dsex_change_pct: Number(json.indices?.dsex_change_pct ?? 0),
+          ds30,
+          ds30_change: Number(json.indices?.ds30_change ?? 0),
+          ds30_change_pct: Number(json.indices?.ds30_change_pct ?? 0),
+          dses: json.indices?.dses ? String(json.indices.dses) : undefined,
+        },
+        picks,
+      };
+    } catch {
+      return null;
+    }
+  })();
+
+  _marketSnapshotPromise = promise;
+  return promise;
+}
+
+export async function loadMlAnalysisCache(force = false): Promise<MlAnalysisEdgeCache | null> {
+  if (!force && _mlCachePromise) {
+    return _mlCachePromise;
+  }
+
+  const promise = (async () => {
+    try {
+      const res = await fetchWithTimeout(
+        `/assets/ml_analysis_cache.json?cycle=${encodeURIComponent(getBstCycleStamp())}`,
+        { cache: 'no-store' },
+        5_000
+      );
+      if (!res.ok) return null;
+      const json = (await res.json()) as Partial<MlAnalysisEdgeCache> | null;
+      if (!json || typeof json !== 'object' || !json.analyses || typeof json.analyses !== 'object') {
+        return null;
+      }
+      return {
+        schema_version: Number(json.schema_version || 2),
+        generated_at_bst: String(json.generated_at_bst || getBDMarketSession().bd_time),
+        trading_date: String(json.trading_date || ''),
+        analyses: json.analyses as Record<string, Record<string, unknown>>,
+      };
+    } catch {
+      return null;
+    }
+  })();
+
+  _mlCachePromise = promise;
+  return promise;
+}
+
+export async function getEdgeCachedStockAnalysis(
+  symbol: string,
+  exchange: Exchange
+): Promise<StockAnalysis | null> {
+  const cleanSym = symbol.trim().toUpperCase();
+  if (!cleanSym) return null;
+
+  const cache = await loadMlAnalysisCache();
+  if (!cache || !cache.analyses) return null;
+
+  const exact = cache.analyses[`${exchange}:${cleanSym}`];
+  const raw = exact || (exchange === 'CSE' ? cache.analyses[`DSE:${cleanSym}`] : undefined);
+  if (!raw || typeof raw !== 'object' || !raw.current_price) {
+    return null;
+  }
+
+  return normalizeStockAnalysis(raw, exchange);
+}
+
 async function loadLockedDailySnapshot(): Promise<{
   generated_at_bst: string;
   picks: TopPick[];
 } | null> {
+  const marketSnap = await loadMarketSnapshot();
+  if (marketSnap && marketSnap.picks.length > 0) {
+    return {
+      generated_at_bst: marketSnap.generated_at_bst,
+      picks: marketSnap.picks,
+    };
+  }
+
   try {
     const res = await fetchWithTimeout(
       `/assets/daily_picks.json?cycle=${encodeURIComponent(getBstCycleStamp())}`,
@@ -177,44 +321,92 @@ async function loadLockedDailySnapshot(): Promise<{
   }
 }
 
-export async function fetchMarketLive(): Promise<MarketLiveTicker> {
+export function readCachedMarketLive(): MarketLiveTicker | null {
+  try {
+    const raw = window.localStorage.getItem(MARKET_LIVE_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<MarketLiveTicker> | null;
+    const dsex = formatValidatedIndex(parsed?.dsex, 1000, 25000);
+    if (!dsex) return null;
+    const ds30 = formatValidatedIndex(parsed?.ds30, 400, 12000) || '—';
+    const session = getBDMarketSession();
+    return {
+      status: 'live',
+      is_stale: false,
+      dsex,
+      ds30,
+      updated: String(parsed?.updated || session.bd_time),
+      session,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function saveCachedMarketLive(ticker: MarketLiveTicker): void {
+  if (!formatValidatedIndex(ticker.dsex, 1000, 25000)) return;
+  try {
+    window.localStorage.setItem(MARKET_LIVE_CACHE_KEY, JSON.stringify(ticker));
+  } catch {
+    // Ignore storage quota errors
+  }
+}
+
+export async function fetchLiveMarketFromApi(timeoutMs = 15_000): Promise<MarketLiveTicker | null> {
   const session = getBDMarketSession();
   try {
-    const res = await fetchWithTimeout(`${API_BASE_URL}/api/market-live`, {}, 15_000);
+    const res = await fetchWithTimeout(`${API_BASE_URL}/api/market-live`, {}, timeoutMs);
     if (res.ok) {
       const data = await res.json();
-      const dsex = String(data.dsex || '').trim();
-      const ds30 = String(data.ds30 || '').trim();
-      const dsexNum = Number(dsex.replace(/,/g, ''));
-      const ds30Num = Number(ds30.replace(/,/g, ''));
-      const isValidDsex = Number.isFinite(dsexNum) && dsexNum >= 1000 && dsexNum <= 25000;
-      const isValidDs30 = Number.isFinite(ds30Num) && ds30Num >= 400 && ds30Num <= 12000;
-      if (isValidDsex) {
-        return {
+      const dsex = formatValidatedIndex(data?.dsex, 1000, 25000);
+      const ds30 = formatValidatedIndex(data?.ds30, 400, 12000);
+      if (dsex) {
+        const ticker: MarketLiveTicker = {
           status: data.status === 'live' || data.status === 'closing' ? 'live' : 'degraded',
           is_stale: Boolean(data.is_stale),
-          dsex: dsexNum.toLocaleString('en-US', {
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2,
-          }),
-          ds30: isValidDs30
-            ? ds30Num.toLocaleString('en-US', {
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2,
-              })
-            : '—',
+          dsex,
+          ds30: ds30 || '—',
           updated: String(data.updated || session.bd_time),
           session,
         };
+        saveCachedMarketLive(ticker);
+        return ticker;
       }
-      if (dsex && dsex !== '—') {
-        console.warn('[MukiSoft API] Unexpected DSEX/DS30 payload from /api/market-live:', data);
-      }
-    } else {
-      console.warn(`[MukiSoft API] /api/market-live HTTP ${res.status}`);
     }
   } catch (err) {
     console.warn('[MukiSoft API] /api/market-live temporarily unreachable:', err);
+  }
+  return null;
+}
+
+export async function fetchMarketLive(): Promise<MarketLiveTicker> {
+  const session = getBDMarketSession();
+
+  // 1. Instant edge hydration from /assets/market_snapshot.json (~10ms on Vercel CDN)
+  const snap = await loadMarketSnapshot();
+  if (snap && snap.indices.dsex) {
+    const snapTicker: MarketLiveTicker = {
+      status: 'live',
+      is_stale: false,
+      dsex: snap.indices.dsex,
+      ds30: snap.indices.ds30 || '—',
+      updated: snap.generated_at_bst || session.bd_time,
+      session,
+    };
+    saveCachedMarketLive(snapTicker);
+    return snapTicker;
+  }
+
+  // 2. Fallback to live Render /api/market-live if edge snapshot is missing
+  const liveTicker = await fetchLiveMarketFromApi(15_000);
+  if (liveTicker) {
+    return liveTicker;
+  }
+
+  // 3. Fallback to previous verified localStorage ticker
+  const localCached = readCachedMarketLive();
+  if (localCached) {
+    return localCached;
   }
 
   return {
@@ -282,10 +474,10 @@ export async function fetchLiveTopPicksFromApi(timeoutMs = 28_000): Promise<TopP
   return null;
 }
 
-export async function fetchTopPicks(preferLive = true): Promise<TopPicksResponse> {
+export async function fetchTopPicks(preferLive = false): Promise<TopPicksResponse> {
   const session = getBDMarketSession();
 
-  // 1. Always attempt fresh dynamic picks from Render backend first when requested
+  // When explicitly forcing a live refresh (e.g. clicking Refresh), hit always-awake Render first
   if (preferLive) {
     const liveResult = await fetchLiveTopPicksFromApi(20_000);
     if (liveResult) {
@@ -293,21 +485,29 @@ export async function fetchTopPicks(preferLive = true): Promise<TopPicksResponse
     }
   }
 
-  // 2. Fall back to latest verified localStorage cache from an earlier live Render response
-  const localCached = readCachedTopPicks();
-  if (localCached && localCached.picks.length > 0) {
-    return localCached;
-  }
-
-  // 3. Last-resort fallback to closing snapshot only if Render is unreachable on cold start
+  // 1. Instant (~10ms) edge snapshot from /assets/market_snapshot.json (or daily_picks.json)
   const snapshot = await loadLockedDailySnapshot();
   if (snapshot && snapshot.picks.length > 0) {
-    return {
+    const out: TopPicksResponse = {
       generated_at_bst: snapshot.generated_at_bst,
       source: 'daily_snapshot',
       live_unavailable: false,
       picks: snapshot.picks,
     };
+    saveCachedTopPicks(out);
+    return out;
+  }
+
+  // 2. Fallback to latest verified localStorage cache from an earlier live Render response
+  const localCached = readCachedTopPicks();
+  if (localCached && localCached.picks.length > 0) {
+    return localCached;
+  }
+
+  // 3. Fallback to live Render API if neither edge snapshot nor localStorage had picks
+  const liveResult = await fetchLiveTopPicksFromApi(20_000);
+  if (liveResult) {
+    return liveResult;
   }
 
   return {

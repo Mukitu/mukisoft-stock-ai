@@ -1534,12 +1534,20 @@ async def _scrape_dse_indices_fallback() -> tuple[str, str] | None:
         unesc = resp.text.replace('\\"', '"')
         dsex_json = re.search(r'"key":"DSEX","value":([0-9.]+)', unesc)
         ds30_json = re.search(r'"key":"DS30","value":([0-9.]+)', unesc)
-        if dsex_json:
-            dsex_num = _parse_float(dsex_json.group(1))
-            ds30_num = _parse_float(ds30_json.group(1)) if ds30_json else 0.0
-            if _is_valid_dsex_value(dsex_num):
-                ds30_fmt = f"{ds30_num:,.2f}" if _is_valid_ds30_value(ds30_num) else "—"
-                return f"{dsex_num:,.2f}", ds30_fmt
+        dsex_num = _parse_float(dsex_json.group(1)) if dsex_json else 0.0
+        ds30_num = _parse_float(ds30_json.group(1)) if ds30_json else 0.0
+
+        # Streaming SSR fallback: extract latest point from initialIntraday DSEX series
+        if not _is_valid_dsex_value(dsex_num):
+            intra_m = re.search(r'"initialIntraday":\{"key":"DSEX","points":\[(.*?)\]', unesc)
+            if intra_m:
+                pts = re.findall(r'"value":([0-9.]+)', intra_m.group(1))
+                if pts:
+                    dsex_num = _parse_float(pts[-1])
+
+        if _is_valid_dsex_value(dsex_num):
+            ds30_fmt = f"{ds30_num:,.2f}" if _is_valid_ds30_value(ds30_num) else "—"
+            return f"{dsex_num:,.2f}", ds30_fmt
 
         # 2. Legacy text pattern fallback
         text = BeautifulSoup(resp.text, "html.parser").get_text(" ", strip=True)

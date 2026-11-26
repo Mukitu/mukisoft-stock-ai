@@ -25,6 +25,5 @@ jobs:
         run: |
           git config user.name "MukiSoft AI Bot"
           git config user.email "bot@mukisoft.tech"
-          git add public/assets/daily_picks.json
-          git diff --staged --quiet || git commit -m "Auto-update 3:00 PM BST genuine Strong Buy stock picks"
-          git push
+          git add public/assets/daily_picks.json public/assets/market_snapshot.json public/assets/ml_analysis_cache.json
+          git diff --staged --quiet || (git commit -m "Auto-update 3:00 PM BST genuine Strong Buy stock picks & ML snapshots" && git pull --rebase origin main && git push)
