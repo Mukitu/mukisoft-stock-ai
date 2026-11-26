@@ -1,7 +1,10 @@
 /**
- * Hard-guaranteed Render FastAPI backend base URL resolver.
- * Prevents accidental fallback to the Vercel frontend origin (stock.mukisoft.tech)
- * if VITE_API_BASE_URL is blank, "/", whitespace, or misconfigured.
+ * Vercel Edge Rewrite + Direct Render FastAPI Backend URL Resolver.
+ * - On Vercel production (stock.mukisoft.tech / *.vercel.app) and AI Studio preview (*.run.app),
+ *   primary requests use same-origin `/api/...` (proxied at the edge via vercel.json / vite.config.ts
+ *   with zero browser CORS preflight overhead).
+ * - Automatically provides direct fallback to `https://mukisoft-stock-ai.onrender.com/api/...`
+ *   if a custom domain or local environment does not have the edge proxy active.
  */
 
 export const DEFAULT_RENDER_API_BASE_URL = 'https://mukisoft-stock-ai.onrender.com';
@@ -32,14 +35,45 @@ export function resolveBackendApiBaseUrl(rawEnvUrl?: string): string {
   }
 }
 
-function isAiStudioDevPreview(): boolean {
-  if (!import.meta.env.DEV || typeof window === 'undefined') {
+export const DIRECT_RENDER_API_BASE_URL = resolveBackendApiBaseUrl(
+  import.meta.env.VITE_API_BASE_URL
+);
+
+function shouldUseSameOriginEdgeProxy(): boolean {
+  if (typeof window === 'undefined') {
     return false;
   }
   const host = window.location.hostname.toLowerCase();
-  return host.endsWith('.run.app');
+  if (
+    host === 'stock.mukisoft.tech' ||
+    host === 'www.stock.mukisoft.tech' ||
+    host.endsWith('.vercel.app') ||
+    host.endsWith('.run.app')
+  ) {
+    return true;
+  }
+  return Boolean(import.meta.env.DEV);
 }
 
-export const API_BASE_URL = isAiStudioDevPreview()
-  ? '/__render_api'
-  : resolveBackendApiBaseUrl(import.meta.env.VITE_API_BASE_URL);
+/**
+ * Primary API base URL:
+ * - '' (same-origin `/api/...` edge rewrite proxy on Vercel production & AI Studio preview)
+ * - Direct Render URL (`https://mukisoft-stock-ai.onrender.com`) on other hosts
+ */
+export const API_BASE_URL = shouldUseSameOriginEdgeProxy()
+  ? ''
+  : DIRECT_RENDER_API_BASE_URL;
+
+/**
+ * Returns ordered candidate URLs for any `/api/...` path:
+ * 1. Same-origin `/api/...` via Vercel Edge Rewrite / Vite proxy (0ms CORS preflight)
+ * 2. Direct `https://mukisoft-stock-ai.onrender.com/api/...` fallback
+ */
+export function getApiCandidateUrls(apiPath: string): string[] {
+  const normalizedPath = apiPath.startsWith('/') ? apiPath : `/${apiPath}`;
+  const primary = `${API_BASE_URL}${normalizedPath}`;
+  const direct = `${DIRECT_RENDER_API_BASE_URL}${normalizedPath}`;
+  return primary === direct ? [direct] : [primary, direct];
+}
+
+export const getCandidateApiUrls = getApiCandidateUrls;

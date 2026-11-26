@@ -10,6 +10,11 @@ export default defineConfig({
     allowedHosts: true,
     hmr: false,
     proxy: {
+      '/api': {
+        target: 'https://mukisoft-stock-ai.onrender.com',
+        changeOrigin: true,
+        secure: true,
+      },
       '/__render_api': {
         target: 'https://mukisoft-stock-ai.onrender.com',
         changeOrigin: true,

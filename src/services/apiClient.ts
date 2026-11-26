@@ -19,9 +19,13 @@ import {
   syncQuotaState,
 } from './quotaService';
 
-import { API_BASE_URL } from '../utils/apiBaseUrl';
+import {
+  API_BASE_URL,
+  DIRECT_RENDER_API_BASE_URL,
+  getCandidateApiUrls,
+} from '../utils/apiBaseUrl';
 
-export { API_BASE_URL };
+export { API_BASE_URL, DIRECT_RENDER_API_BASE_URL };
 
 export const LIVE_FEED_WAITING_BN =
   'লাইভ ও সর্বশেষ ক্লোজিং মার্কেট ডেটা সংগ্রহ করে ১৭-ফিচার XGBoost বিশ্লেষণ চলছে...';
@@ -352,10 +356,41 @@ export function saveCachedMarketLive(ticker: MarketLiveTicker): void {
   }
 }
 
-export async function fetchLiveMarketFromApi(timeoutMs = 15_000): Promise<MarketLiveTicker | null> {
+async function fetchFromApiWithFallback(
+  apiPath: string,
+  options: RequestInit = {},
+  perAttemptTimeoutMs = 8_000
+): Promise<Response> {
+  const candidateUrls = getCandidateApiUrls(apiPath);
+  let lastError: unknown = null;
+  let lastResponse: Response | null = null;
+
+  for (let i = 0; i < candidateUrls.length; i++) {
+    const url = candidateUrls[i];
+    try {
+      const res = await fetchWithTimeout(url, options, perAttemptTimeoutMs);
+      const contentType = (res.headers.get('content-type') || '').toLowerCase();
+      // If same-origin rewrite accidentally returned HTML instead of JSON or a 502/504 gateway error, try direct Render URL
+      const isHtmlFallback = contentType.includes('text/html');
+      if (!isHtmlFallback && res.status !== 502 && res.status !== 503 && res.status !== 504) {
+        return res;
+      }
+      lastResponse = res;
+    } catch (err) {
+      lastError = err;
+    }
+  }
+
+  if (lastResponse) {
+    return lastResponse;
+  }
+  throw lastError || new BackendWakeupError();
+}
+
+export async function fetchLiveMarketFromApi(timeoutMs = 7_000): Promise<MarketLiveTicker | null> {
   const session = getBDMarketSession();
   try {
-    const res = await fetchWithTimeout(`${API_BASE_URL}/api/market-live`, {}, timeoutMs);
+    const res = await fetchFromApiWithFallback('/api/market-live', {}, timeoutMs);
     if (res.ok) {
       const data = await res.json();
       const dsex = formatValidatedIndex(data?.dsex, 1000, 25000);
@@ -449,10 +484,10 @@ export function saveCachedTopPicks(payload: TopPicksResponse): void {
   }
 }
 
-export async function fetchLiveTopPicksFromApi(timeoutMs = 28_000): Promise<TopPicksResponse | null> {
+export async function fetchLiveTopPicksFromApi(timeoutMs = 12_000): Promise<TopPicksResponse | null> {
   const session = getBDMarketSession();
   try {
-    const res = await fetchWithTimeout(`${API_BASE_URL}/api/top-picks`, {}, timeoutMs);
+    const res = await fetchFromApiWithFallback('/api/top-picks', {}, timeoutMs);
     if (!res.ok) return null;
     const data = await res.json();
     const verified = sanitizeVerifiedTopPicks(data?.picks);
@@ -549,18 +584,27 @@ export async function analyzeStock(symbol: string, exchange: Exchange): Promise<
     throw new StockNotFoundError('অনুগ্রহ করে একটি বৈধ কোম্পানির কোড নির্বাচন করুন।', 422);
   }
 
-  const quotaHeaders = await getQuotaRequestHeaders();
+  const [quotaHeaders, edgeCached] = await Promise.all([
+    getQuotaRequestHeaders(),
+    getEdgeCachedStockAnalysis(cleanSym, exchange),
+  ]);
 
-  const endpointUrl = `${API_BASE_URL}/api/analyze?symbol=${encodeURIComponent(cleanSym)}&exchange=${encodeURIComponent(exchange)}`;
+  const apiPath = `/api/analyze?symbol=${encodeURIComponent(cleanSym)}&exchange=${encodeURIComponent(exchange)}`;
+  // If we already have a pre-computed edge ML analysis for this symbol, bound live upstream wait to 5 seconds
+  const perAttemptTimeout = edgeCached ? 5_000 : 12_000;
+
   let res: Response;
   try {
-    res = await fetchWithTimeout(
-      endpointUrl,
+    res = await fetchFromApiWithFallback(
+      apiPath,
       { headers: quotaHeaders },
-      35_000
+      perAttemptTimeout
     );
   } catch (err) {
-    console.error(`[MukiSoft API] /api/analyze network/timeout error for ${cleanSym} (${exchange}):`, err);
+    if (edgeCached) {
+      return edgeCached;
+    }
+    console.warn(`[MukiSoft API] /api/analyze network/timeout for ${cleanSym} (${exchange}):`, err);
     throw new BackendWakeupError();
   }
 
@@ -569,21 +613,20 @@ export async function analyzeStock(symbol: string, exchange: Exchange): Promise<
     handleQuotaExceededResponse(data);
   }
   if (res.status === 404 || res.status === 422) {
+    if (edgeCached) {
+      return edgeCached;
+    }
     throw new StockNotFoundError(
       (data && typeof data.detail === 'string' && data.detail) ||
         `'${cleanSym}' (${exchange}) ট্রেডিং কোডটি DSE/CSE-এর অফিসিয়াল ডেটায় পাওয়া যায়নি।`,
       res.status
     );
   }
-  if (res.status >= 500) {
-    console.error(`[MukiSoft API] /api/analyze HTTP ${res.status} for ${cleanSym}:`, data);
-    throw new BackendWakeupError(
-      (data && typeof data.detail === 'string' && data.detail) || undefined,
-      res.status
-    );
-  }
-  if (!res.ok || !data || !data.current_price) {
-    console.error(`[MukiSoft API] /api/analyze unexpected response (${res.status}) for ${cleanSym}:`, data);
+  if (res.status >= 500 || !res.ok || !data || !data.current_price) {
+    if (edgeCached) {
+      return edgeCached;
+    }
+    console.warn(`[MukiSoft API] /api/analyze fallback (${res.status}) for ${cleanSym}:`, data);
     throw new BackendWakeupError(
       (data && typeof data.detail === 'string' && data.detail) || undefined,
       res.status || 503
@@ -599,8 +642,8 @@ export async function analyzeManualStock(payload: ManualStockPayload): Promise<S
 
   let res: Response;
   try {
-    res = await fetchWithTimeout(
-      `${API_BASE_URL}/api/analyze-manual`,
+    res = await fetchFromApiWithFallback(
+      '/api/analyze-manual',
       {
         method: 'POST',
         headers: {
@@ -609,7 +652,7 @@ export async function analyzeManualStock(payload: ManualStockPayload): Promise<S
         },
         body: JSON.stringify(payload),
       },
-      18_000
+      12_000
     );
   } catch {
     throw new Error(LIVE_FEED_WAITING_BN);
@@ -643,10 +686,10 @@ export async function analyzeDocuments(
 
   let res: Response;
   try {
-    res = await fetchWithTimeout(
-      `${API_BASE_URL}/api/analyze-document`,
+    res = await fetchFromApiWithFallback(
+      '/api/analyze-document',
       { method: 'POST', headers: quotaHeaders, body: formData },
-      35_000
+      25_000
     );
   } catch {
     throw new Error(LIVE_FEED_WAITING_BN);
@@ -672,14 +715,14 @@ export async function submitContactMessage(payload: {
   message: string;
 }): Promise<{ status: string; message: string }> {
   try {
-    const res = await fetchWithTimeout(
-      `${API_BASE_URL}/api/contact`,
+    const res = await fetchFromApiWithFallback(
+      '/api/contact',
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       },
-      8_000
+      6_000
     );
     if (res.ok) {
       return await res.json();
