@@ -1449,6 +1449,7 @@ for origin_candidate in raw_origins_combined.split(","):
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
+    allow_origin_regex=r"^https://ais-(?:dev|pre)-[a-z0-9-]+\.[a-z0-9-]+\.run\.app$",
     allow_credentials=True,
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=[

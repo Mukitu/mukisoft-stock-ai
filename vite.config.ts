@@ -9,6 +9,14 @@ export default defineConfig({
     port: 3000,
     allowedHosts: true,
     hmr: false,
+    proxy: {
+      '/__render_api': {
+        target: 'https://mukisoft-stock-ai.onrender.com',
+        changeOrigin: true,
+        secure: true,
+        rewrite: (path) => path.replace(/^\/__render_api/, ''),
+      },
+    },
   },
   preview: {
     host: '0.0.0.0',

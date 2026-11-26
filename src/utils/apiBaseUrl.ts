@@ -32,4 +32,14 @@ export function resolveBackendApiBaseUrl(rawEnvUrl?: string): string {
   }
 }
 
-export const API_BASE_URL = resolveBackendApiBaseUrl(import.meta.env.VITE_API_BASE_URL);
+function isAiStudioDevPreview(): boolean {
+  if (!import.meta.env.DEV || typeof window === 'undefined') {
+    return false;
+  }
+  const host = window.location.hostname.toLowerCase();
+  return host.endsWith('.run.app');
+}
+
+export const API_BASE_URL = isAiStudioDevPreview()
+  ? '/__render_api'
+  : resolveBackendApiBaseUrl(import.meta.env.VITE_API_BASE_URL);

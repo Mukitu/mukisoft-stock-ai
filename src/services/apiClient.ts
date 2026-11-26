@@ -211,10 +211,10 @@ export async function fetchMarketLive(): Promise<MarketLiveTicker> {
         console.warn('[MukiSoft API] Unexpected DSEX/DS30 payload from /api/market-live:', data);
       }
     } else {
-      console.error(`[MukiSoft API] /api/market-live HTTP ${res.status}`);
+      console.warn(`[MukiSoft API] /api/market-live HTTP ${res.status}`);
     }
   } catch (err) {
-    console.error('[MukiSoft API] /api/market-live request failed:', err);
+    console.warn('[MukiSoft API] /api/market-live temporarily unreachable:', err);
   }
 
   return {
