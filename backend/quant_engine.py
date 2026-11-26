@@ -77,10 +77,21 @@ def get_bd_market_session(now: dt.datetime | None = None) -> dict[str, Any]:
             "bd_time": bd_now.strftime("%d %b %Y, %I:%M %p"),
         }
 
+    is_weekend = weekday in (4, 5) or (weekday == 3 and minutes > 870)
+    if is_weekend:
+        return {
+            "is_live": False,
+            "mode": "WEEKEND",
+            "badge": "সাপ্তাহিক মার্কেট বন্ধ • সর্বশেষ ক্লোজিং ডেটা (রবিবার ১০:০০ AM BST)",
+            "headline": "সাপ্তাহিক AI র‍্যাডার: Strong Bullish Setup পর্যবেক্ষণ",
+            "subtext": "সর্বশেষ ক্লোজিং ডেটা ও ২০-ইন্ডিকেটর কনসেনসাস বিশ্লেষণে বাছাইকৃত গবেষণামূলক তালিকা",
+            "bd_time": bd_now.strftime("%d %b %Y, %I:%M %p"),
+        }
+
     return {
         "is_live": False,
         "mode": "DAILY_LOCK",
-        "badge": "৩:০০ PM ডেইলি লক • পরবর্তী সেশন সকাল ১০:০০টা BST",
+        "badge": "মার্কেট বন্ধ - সর্বশেষ ক্লোজিং ডেটা • পরবর্তী সেশন সকাল ১০:০০টা BST",
         "headline": "আগামী কার্যদিবসের Strong Bullish Setup পর্যবেক্ষণ তালিকা",
         "subtext": "সর্বশেষ ক্লোজিং ডেটা ও ২০-ইন্ডিকেটর কনসেনসাস বিশ্লেষণে বাছাইকৃত গবেষণামূলক তালিকা",
         "bd_time": bd_now.strftime("%d %b %Y, %I:%M %p"),
@@ -446,27 +457,47 @@ def build_manual_ohlcv_frame(
 
 def compute_real_buy_score(analysis: dict[str, Any]) -> float:
     """
-    Ranks genuine Strong Buy stocks strictly by:
-    - Real bullish indicator consensus count (15..20)
-    - Real XGBoost ML confidence
-    - Real positive intraday momentum & relative volume ratio
+    Ranks genuine Strong Buy setups strictly by profitability & statistical strength:
+    - Expected upside % ((target_price - price) / price)
+    - Risk-Reward Ratio (upside / downside)
+    - Real XGBoost ML bullish probability / confidence
+    - Real 20-indicator bullish consensus count (15..20)
+    - Real positive momentum & relative volume ratio
     """
+    price = max(0.01, float(analysis.get("current_price", analysis.get("price", 0.0)) or 0.01))
+    target = float(analysis.get("target_price", price) or price)
+    stop_loss = float(analysis.get("stop_loss", price * 0.96) or (price * 0.96))
+
+    upside_pct = max(0.0, ((target - price) / price) * 100.0)
+    downside_pct = max(0.5, ((price - stop_loss) / price) * 100.0)
+    risk_reward = min(6.0, upside_pct / downside_pct)
+
     bull_votes = int(analysis.get("bull_votes", 0))
     confidence = float(analysis.get("confidence", 0.0))
     change_pct = max(0.0, float(analysis.get("change_pct", 0.0)))
     vol_ratio = min(4.0, max(0.5, float(analysis.get("vol_ratio", 1.0))))
-    return round(bull_votes * 10.0 + confidence + change_pct * 3.0 + vol_ratio * 4.0, 2)
+
+    score = (
+        upside_pct * 3.5
+        + risk_reward * 18.0
+        + confidence * 1.15
+        + bull_votes * 9.0
+        + change_pct * 2.5
+        + vol_ratio * 4.0
+    )
+    return round(score, 2)
 
 
 def select_genuine_top_picks(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """
     Strictly select ONLY genuine Strong Buy stocks passing EVERY real-time filter:
-      1. price >= 12.0 BDT, positive intraday momentum (change_pct > 0), non-sideways, volume > 0
+      1. price >= 12.0 BDT, positive momentum (change_pct > 0), non-sideways, volume > 0
       2. ML Strong Buy verdict (ml_signal_code == 2 and signal_code == 2)
       3. 15 to 20 bullish technical indicator votes (15 <= bull_votes <= 20)
-      4. Never relabels Hold/Sideways stocks and never excludes genuine consecutive-day top stocks.
-    Selects up to 3 lowest-priced (12–99.99 BDT) + up to 3 mid/large-cap (>= 100 BDT),
-    ranked from highest bullish indicator count & buying momentum downward.
+      4. Never relabels Hold/Sideways stocks and never uses static/hardcoded picks.
+    Selects up to 3 low-cap (12–99.99 BDT) + up to 3 mid/large-cap (>= 100 BDT)
+    (filling remaining slots up to 6 from the highest-ranked genuine candidates if one bucket has < 3),
+    and strictly orders the final top 6 from #1 most profitable / highest-confidence / best risk-reward downward.
     """
     genuine = [
         c for c in candidates
@@ -479,25 +510,43 @@ def select_genuine_top_picks(candidates: list[dict[str, Any]]) -> list[dict[str,
         and float(c.get("volume", 1.0)) > 0.0
     ]
 
-    def rank_key(item: dict[str, Any]) -> tuple[int, float, float, float]:
+    def _risk_reward(item: dict[str, Any]) -> float:
+        price = max(0.01, float(item.get("price", 0.0) or 0.01))
+        target = float(item.get("target_price", price) or price)
+        stop = float(item.get("stop_loss", price * 0.96) or (price * 0.96))
+        up = max(0.0, (target - price) / price)
+        down = max(0.005, (price - stop) / price)
+        return up / down
+
+    def rank_key(item: dict[str, Any]) -> tuple[float, float, float, int, float]:
         return (
-            -int(item.get("bull_votes", 0)),
             -float(item.get("buy_score", 0.0)),
-            -float(item.get("vol_ratio", 1.0)),
+            -_risk_reward(item),
+            -float(item.get("confidence", 0.0)),
+            -int(item.get("bull_votes", 0)),
             -float(item.get("change_pct", 0.0)),
         )
 
-    low_three = sorted(
+    low_ranked = sorted(
         [c for c in genuine if MIN_STRONG_BUY_PRICE <= float(c["price"]) < 100.0],
         key=rank_key,
-    )[:3]
-
-    high_three = sorted(
+    )
+    high_ranked = sorted(
         [c for c in genuine if float(c["price"]) >= 100.0],
         key=rank_key,
-    )[:3]
+    )
 
-    return low_three + high_three
+    selected = low_ranked[:3] + high_ranked[:3]
+    if len(selected) < 6:
+        selected_syms = {str(item["symbol"]).upper() for item in selected}
+        leftovers = sorted(
+            [c for c in genuine if str(c["symbol"]).upper() not in selected_syms],
+            key=rank_key,
+        )
+        selected.extend(leftovers[: 6 - len(selected)])
+
+    # Strictly order the final top 6 so the #1 most profitable / highest-confidence setup is always first
+    return sorted(selected, key=rank_key)[:6]
 
 
 def rank_active_market_candidates(live_df: pd.DataFrame) -> list[dict[str, Any]]:

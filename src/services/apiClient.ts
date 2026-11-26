@@ -24,7 +24,28 @@ export const API_BASE_URL = (
 ).replace(/\/+$/, '');
 
 export const LIVE_FEED_WAITING_BN =
-  'লাইভ মার্কেট ডেটা সংগ্রহ করা হচ্ছে, অনুগ্রহ করে কয়েক মুহূর্ত অপেক্ষা করুন...';
+  'লাইভ ও সর্বশেষ ক্লোজিং মার্কেট ডেটা সংগ্রহ করে ১৭-ফিচার XGBoost বিশ্লেষণ চলছে...';
+
+export class StockNotFoundError extends Error {
+  public readonly status: number;
+  constructor(message: string, status = 404) {
+    super(message);
+    this.name = 'StockNotFoundError';
+    this.status = status;
+  }
+}
+
+export class BackendWakeupError extends Error {
+  public readonly status: number;
+  constructor(message?: string, status = 503) {
+    super(
+      message ||
+        'ক্লাউড AI অ্যানালাইসিস সার্ভার চালু হচ্ছে—স্বয়ংক্রিয়ভাবে পুনরায় চেষ্টা করা হচ্ছে...'
+    );
+    this.name = 'BackendWakeupError';
+    this.status = status;
+  }
+}
 
 async function fetchWithTimeout(
   url: string,
@@ -159,14 +180,14 @@ async function loadLockedDailySnapshot(): Promise<{
 export async function fetchMarketLive(): Promise<MarketLiveTicker> {
   const session = getBDMarketSession();
   try {
-    const res = await fetchWithTimeout(`${API_BASE_URL}/api/market-live`, {}, 12_000);
+    const res = await fetchWithTimeout(`${API_BASE_URL}/api/market-live`, {}, 20_000);
     if (res.ok) {
       const data = await res.json();
       const dsex = String(data.dsex || '').trim();
       const ds30 = String(data.ds30 || '').trim();
       if (dsex && dsex !== '—') {
         return {
-          status: data.status === 'live' ? 'live' : 'degraded',
+          status: data.status === 'live' || data.status === 'closing' ? 'live' : 'degraded',
           is_stale: Boolean(data.is_stale),
           dsex,
           ds30: ds30 || '—',
@@ -308,7 +329,7 @@ function handleQuotaExceededResponse(data: unknown): never {
 export async function analyzeStock(symbol: string, exchange: Exchange): Promise<StockAnalysis> {
   const cleanSym = symbol.trim().toUpperCase();
   if (!cleanSym) {
-    throw new Error('অনুগ্রহ করে একটি বৈধ কোম্পানির কোড নির্বাচন করুন।');
+    throw new StockNotFoundError('অনুগ্রহ করে একটি বৈধ কোম্পানির কোড নির্বাচন করুন।', 422);
   }
 
   const quotaHeaders = await getQuotaRequestHeaders();
@@ -318,19 +339,33 @@ export async function analyzeStock(symbol: string, exchange: Exchange): Promise<
     res = await fetchWithTimeout(
       `${API_BASE_URL}/api/analyze?symbol=${encodeURIComponent(cleanSym)}&exchange=${encodeURIComponent(exchange)}`,
       { headers: quotaHeaders },
-      20_000
+      35_000
     );
   } catch {
-    throw new Error(LIVE_FEED_WAITING_BN);
+    throw new BackendWakeupError();
   }
 
   const data = await res.json().catch(() => null);
   if (res.status === 429) {
     handleQuotaExceededResponse(data);
   }
+  if (res.status === 404 || res.status === 422) {
+    throw new StockNotFoundError(
+      (data && typeof data.detail === 'string' && data.detail) ||
+        `'${cleanSym}' (${exchange}) ট্রেডিং কোডটি DSE/CSE-এর অফিসিয়াল ডেটায় পাওয়া যায়নি।`,
+      res.status
+    );
+  }
+  if (res.status >= 500) {
+    throw new BackendWakeupError(
+      (data && typeof data.detail === 'string' && data.detail) || undefined,
+      res.status
+    );
+  }
   if (!res.ok || !data || !data.current_price) {
-    throw new Error(
-      (data && typeof data.detail === 'string' && data.detail) || LIVE_FEED_WAITING_BN
+    throw new BackendWakeupError(
+      (data && typeof data.detail === 'string' && data.detail) || undefined,
+      res.status || 503
     );
   }
 

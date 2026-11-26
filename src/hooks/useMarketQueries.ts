@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Exchange, ManualStockPayload } from '../types/market';
 import {
+  StockNotFoundError,
   analyzeDocuments,
   analyzeManualStock,
   analyzeStock,
@@ -19,6 +20,8 @@ export function useMarketLive() {
     queryKey: ['market-live'],
     queryFn: fetchMarketLive,
     staleTime: 60_000,
+    retry: 2,
+    retryDelay: 2_500,
     refetchInterval: session.is_live ? 60_000 : false,
   });
 }
@@ -61,7 +64,13 @@ export function useStockAnalysis(symbol: string, exchange: Exchange, enabled = t
     queryFn: () => analyzeStock(cleanSym, exchange),
     enabled: enabled && cleanSym.length > 0,
     staleTime: 180_000,
-    retry: (failureCount, error) => !(error instanceof QuotaExceededError) && failureCount < 1,
+    retry: (failureCount, error) => {
+      if (error instanceof QuotaExceededError || error instanceof StockNotFoundError) {
+        return false;
+      }
+      return failureCount < 3;
+    },
+    retryDelay: (attemptIndex) => Math.min(5_000, 2_500 + attemptIndex * 1_500),
   });
 }
 

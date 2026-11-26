@@ -21,7 +21,7 @@ import { PriceMovementChart } from '../components/charts/PriceMovementChart';
 import { BanglaReportCard } from '../components/common/BanglaReportCard';
 import { FreeQuotaBanner } from '../components/common/FreeQuotaBanner';
 import { FreeQuotaPaywallModal } from '../components/bdapps/FreeQuotaPaywallModal';
-import { LIVE_FEED_WAITING_BN } from '../services/apiClient';
+import { LIVE_FEED_WAITING_BN, StockNotFoundError } from '../services/apiClient';
 import { QuotaExceededError } from '../services/quotaService';
 import {
   formatStrongBuyConsensusLine,
@@ -96,10 +96,23 @@ export function AnalyzerPage() {
     isFetching,
     isError,
     error: queryError,
+    failureCount,
     refetch,
   } = useStockAnalysis(activeQuery.symbol, activeQuery.exchange, canRunLiveQuery);
   const manualMutation = useManualAnalysisMutation();
   const docMutation = useDocumentAnalysisMutation();
+
+  const [elapsedSec, setElapsedSec] = useState(0);
+  useEffect(() => {
+    if (!(isFetching || isAuthorizingQuota)) {
+      setElapsedSec(0);
+      return;
+    }
+    const id = window.setInterval(() => {
+      setElapsedSec((prev) => prev + 1);
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [isFetching, isAuthorizingQuota]);
 
   const currentAnalysis: StockAnalysis | undefined = quotaBlocked
     ? undefined
@@ -202,7 +215,11 @@ export function AnalyzerPage() {
     setQuotaBlocked(false);
 
     if (clean === activeQuery.symbol && exchange === activeQuery.exchange) {
-      void authorizeLiveSymbol(clean, exchange);
+      void authorizeLiveSymbol(clean, exchange).then(() => {
+        if (isSubscribed || authorizedKey === `${exchange}:${clean}`) {
+          void refetch();
+        }
+      });
       return;
     }
 
@@ -731,38 +748,89 @@ export function AnalyzerPage() {
           </p>
         </div>
       ) : (isFetching || isAuthorizingQuota) && !currentAnalysis ? (
-        <div className="bg-white border border-slate-200 rounded-xl p-12 text-center space-y-3">
-          <div className="w-9 h-9 border-4 border-blue-700 border-t-transparent rounded-full animate-spin mx-auto" />
-          <p className="text-sm font-semibold text-slate-800">{LIVE_FEED_WAITING_BN}</p>
-          <p className="text-xs text-slate-500">
-            {activeQuery.symbol} ({activeQuery.exchange})-এর রিয়েল-টাইম ঐতিহাসিক ডেটা ও ২০টি সূচক যাচাই চলছে।
-          </p>
+        <div className="bg-white border border-blue-200 rounded-xl p-8 sm:p-10 text-center space-y-5">
+          <div className="w-10 h-10 border-4 border-blue-700 border-t-transparent rounded-full animate-spin mx-auto" />
+          <div className="space-y-1.5">
+            <p className="text-sm sm:text-base font-bold text-slate-900">
+              {activeQuery.symbol} ({activeQuery.exchange}) — কোয়ান্টিটেটিভ AI বিশ্লেষণ চলছে
+              {elapsedSec > 0 ? ` (${toBanglaDigits(elapsedSec)} সে.)` : ''}
+            </p>
+            <p className="text-xs text-slate-600 max-w-lg mx-auto leading-relaxed">
+              {failureCount > 0 || elapsedSec >= 6
+                ? 'ক্লাউড AI ইঞ্জিন ও DSE/CSE ডেটা ফিড সংযোগ তৈরি হচ্ছে—অনুগ্রহ করে কয়েক সেকেন্ড অপেক্ষা করুন, ফলাফল স্বয়ংক্রিয়ভাবে প্রদর্শিত হবে।'
+                : LIVE_FEED_WAITING_BN}
+            </p>
+          </div>
+          <div className="max-w-md mx-auto grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px] font-semibold">
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-800 px-3 py-2">
+              ১. লাইভ / ক্লোজিং OHLCV
+            </div>
+            <div
+              className={`rounded-lg border px-3 py-2 ${
+                elapsedSec >= 2
+                  ? 'border-blue-200 bg-blue-50 text-blue-800'
+                  : 'border-slate-200 bg-slate-50 text-slate-500'
+              }`}
+            >
+              ২. XGBoost + ২০ সূচক
+            </div>
+            <div
+              className={`rounded-lg border px-3 py-2 ${
+                elapsedSec >= 4
+                  ? 'border-blue-200 bg-blue-50 text-blue-800'
+                  : 'border-slate-200 bg-slate-50 text-slate-500'
+              }`}
+            >
+              ৩. বাংলা AI রিপোর্ট
+            </div>
+          </div>
         </div>
       ) : isError && !currentAnalysis ? (
         <div className="bg-white border border-slate-200 rounded-xl p-10 text-center space-y-4">
-          <p className="text-sm font-semibold text-slate-800">
-            {queryError instanceof Error ? queryError.message : LIVE_FEED_WAITING_BN}
-          </p>
-          <p className="text-xs text-slate-500 max-w-lg mx-auto">
-            আমরা কোনো ডেমো বা অনুমানভিত্তিক প্রাইস দেখাই না। কয়েক মুহূর্ত পর আবার চেষ্টা করুন অথবা ডকুমেন্ট OCR / ম্যানুয়াল OHLCV ইনপুট ব্যবহার করুন।
-          </p>
-          <div className="flex flex-wrap items-center justify-center gap-3">
-            <button
-              type="button"
-              onClick={() => void refetch()}
-              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-blue-700 hover:bg-blue-800 text-white text-xs font-semibold cursor-pointer"
-            >
-              <RefreshCw className="w-3.5 h-3.5" />
-              <span>আবার চেষ্টা করুন</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowAdvancedInput(true)}
-              className="px-4 py-2 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 text-xs font-semibold cursor-pointer"
-            >
-              ডকুমেন্ট OCR / ম্যানুয়াল ইনপুট খুলুন
-            </button>
-          </div>
+          {queryError instanceof StockNotFoundError ? (
+            <>
+              <p className="text-sm font-bold text-slate-900">{queryError.message}</p>
+              <p className="text-xs text-slate-500 max-w-lg mx-auto leading-relaxed">
+                ট্রেডিং কোডের বানান যাচাই করে আবার সার্চ করুন (যেমন: SQURPHARMA, BRACBANK, GP, WALTONHIL)। চাইলে নিচ থেকে ম্যানুয়াল OHLCV বা ডকুমেন্ট OCR বিশ্লেষণও চালাতে পারেন।
+              </p>
+              <div className="flex flex-wrap items-center justify-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => void refetch()}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-blue-700 hover:bg-blue-800 text-white text-xs font-semibold cursor-pointer"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>আবার যাচাই করুন</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowAdvancedInput(true)}
+                  className="px-4 py-2 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 text-xs font-semibold cursor-pointer"
+                >
+                  ডকুমেন্ট OCR / ম্যানুয়াল ইনপুট খুলুন
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <p className="text-sm font-semibold text-slate-800">
+                সার্ভারের সাথে সংযোগ হতে স্বাভাবিকের চেয়ে একটু বেশি সময় লাগছে।
+              </p>
+              <p className="text-xs text-slate-500 max-w-lg mx-auto leading-relaxed">
+                {activeQuery.symbol} ({activeQuery.exchange})-এর সর্বশেষ DSE/CSE ডেটা আনতে নিচের বাটনে ক্লিক করুন—মার্কেট বন্ধ থাকলেও সর্বশেষ ক্লোজিং ডেটায় পূর্ণ AI বিশ্লেষণ চালু হবে।
+              </p>
+              <div className="flex flex-wrap items-center justify-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => void refetch()}
+                  className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-lg bg-blue-700 hover:bg-blue-800 text-white text-xs font-semibold cursor-pointer"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>পুনরায় বিশ্লেষণ করুন</span>
+                </button>
+              </div>
+            </>
+          )}
         </div>
       ) : currentAnalysis ? (
         <div className="space-y-6">

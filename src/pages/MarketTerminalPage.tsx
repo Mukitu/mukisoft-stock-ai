@@ -264,6 +264,9 @@ export function MarketTerminalPage() {
           <div className="py-16 text-center space-y-3">
             <Loader2 className="w-8 h-8 text-blue-700 animate-spin mx-auto" />
             <p className="text-sm font-semibold text-slate-800">{LIVE_FEED_WAITING_BN}</p>
+            <p className="text-xs text-slate-500">
+              {symbol} ({exchange})-এর সর্বশেষ ক্যান্ডেলস্টিক OHLCV ও ২০টি ইন্ডিকেটর লোড হচ্ছে...
+            </p>
           </div>
         ) : isQuotaError ? (
           <div className="py-14 text-center space-y-3">
