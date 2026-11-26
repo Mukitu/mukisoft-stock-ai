@@ -21,11 +21,12 @@ import {
 
 import {
   API_BASE_URL,
+  API_TIMEOUT_MS,
   DIRECT_RENDER_API_BASE_URL,
   getCandidateApiUrls,
 } from '../utils/apiBaseUrl';
 
-export { API_BASE_URL, DIRECT_RENDER_API_BASE_URL };
+export { API_BASE_URL, API_TIMEOUT_MS, DIRECT_RENDER_API_BASE_URL };
 
 export const LIVE_FEED_WAITING_BN =
   'লাইভ ও সর্বশেষ ক্লোজিং মার্কেট ডেটা সংগ্রহ করে ১৭-ফিচার XGBoost বিশ্লেষণ চলছে...';
@@ -54,7 +55,7 @@ export class BackendWakeupError extends Error {
 async function fetchWithTimeout(
   url: string,
   options: RequestInit = {},
-  timeoutMs = 15_000
+  timeoutMs = API_TIMEOUT_MS
 ): Promise<Response> {
   const controller = new AbortController();
   const timer = window.setTimeout(() => controller.abort(), timeoutMs);
@@ -183,6 +184,7 @@ interface MlAnalysisEdgeCache {
 
 let _marketSnapshotPromise: Promise<MarketEdgeSnapshot | null> | null = null;
 let _mlCachePromise: Promise<MlAnalysisEdgeCache | null> | null = null;
+let _mlCacheData: MlAnalysisEdgeCache | null = null;
 
 function formatValidatedIndex(raw: unknown, minVal: number, maxVal: number): string | null {
   const str = String(raw ?? '').trim();
@@ -204,12 +206,16 @@ export async function loadMarketSnapshot(force = false): Promise<MarketEdgeSnaps
     try {
       const res = await fetchWithTimeout(
         `/assets/market_snapshot.json?cycle=${encodeURIComponent(getBstCycleStamp())}`,
-        { cache: 'no-store' },
+        { cache: 'default' },
         4_000
       );
-      if (!res.ok) return null;
+      if (!res.ok) {
+        _marketSnapshotPromise = null;
+        return null;
+      }
       const json = (await res.json()) as Partial<MarketEdgeSnapshot> | null;
       if (!json || typeof json !== 'object' || Number(json.schema_version) < 2) {
+        _marketSnapshotPromise = null;
         return null;
       }
       const dsex = formatValidatedIndex(json.indices?.dsex, 1000, 25000) || '';
@@ -232,6 +238,7 @@ export async function loadMarketSnapshot(force = false): Promise<MarketEdgeSnaps
         picks,
       };
     } catch {
+      _marketSnapshotPromise = null;
       return null;
     }
   })();
@@ -241,6 +248,9 @@ export async function loadMarketSnapshot(force = false): Promise<MarketEdgeSnaps
 }
 
 export async function loadMlAnalysisCache(force = false): Promise<MlAnalysisEdgeCache | null> {
+  if (!force && _mlCacheData) {
+    return _mlCacheData;
+  }
   if (!force && _mlCachePromise) {
     return _mlCachePromise;
   }
@@ -249,21 +259,28 @@ export async function loadMlAnalysisCache(force = false): Promise<MlAnalysisEdge
     try {
       const res = await fetchWithTimeout(
         `/assets/ml_analysis_cache.json?cycle=${encodeURIComponent(getBstCycleStamp())}`,
-        { cache: 'no-store' },
+        { cache: 'default' },
         5_000
       );
-      if (!res.ok) return null;
-      const json = (await res.json()) as Partial<MlAnalysisEdgeCache> | null;
-      if (!json || typeof json !== 'object' || !json.analyses || typeof json.analyses !== 'object') {
+      if (!res.ok) {
+        _mlCachePromise = null;
         return null;
       }
-      return {
+      const json = (await res.json()) as Partial<MlAnalysisEdgeCache> | null;
+      if (!json || typeof json !== 'object' || !json.analyses || typeof json.analyses !== 'object') {
+        _mlCachePromise = null;
+        return null;
+      }
+      const loaded: MlAnalysisEdgeCache = {
         schema_version: Number(json.schema_version || 2),
         generated_at_bst: String(json.generated_at_bst || getBDMarketSession().bd_time),
         trading_date: String(json.trading_date || ''),
         analyses: json.analyses as Record<string, Record<string, unknown>>,
       };
+      _mlCacheData = loaded;
+      return loaded;
     } catch {
+      _mlCachePromise = null;
       return null;
     }
   })();
@@ -272,12 +289,30 @@ export async function loadMlAnalysisCache(force = false): Promise<MlAnalysisEdge
   return promise;
 }
 
+export function getEdgeCachedStockAnalysisSync(
+  symbol: string,
+  exchange: Exchange
+): StockAnalysis | null {
+  const cleanSym = symbol.trim().toUpperCase();
+  if (!cleanSym || !_mlCacheData || !_mlCacheData.analyses) return null;
+
+  const exact = _mlCacheData.analyses[`${exchange}:${cleanSym}`];
+  const raw = exact || (exchange === 'CSE' ? _mlCacheData.analyses[`DSE:${cleanSym}`] : undefined);
+  if (!raw || typeof raw !== 'object' || !raw.current_price) {
+    return null;
+  }
+  return normalizeStockAnalysis(raw, exchange);
+}
+
 export async function getEdgeCachedStockAnalysis(
   symbol: string,
   exchange: Exchange
 ): Promise<StockAnalysis | null> {
   const cleanSym = symbol.trim().toUpperCase();
   if (!cleanSym) return null;
+
+  const syncHit = getEdgeCachedStockAnalysisSync(cleanSym, exchange);
+  if (syncHit) return syncHit;
 
   const cache = await loadMlAnalysisCache();
   if (!cache || !cache.analyses) return null;
@@ -359,7 +394,7 @@ export function saveCachedMarketLive(ticker: MarketLiveTicker): void {
 async function fetchFromApiWithFallback(
   apiPath: string,
   options: RequestInit = {},
-  perAttemptTimeoutMs = 8_000
+  perAttemptTimeoutMs = API_TIMEOUT_MS
 ): Promise<Response> {
   const candidateUrls = getCandidateApiUrls(apiPath);
   let lastError: unknown = null;
@@ -387,7 +422,7 @@ async function fetchFromApiWithFallback(
   throw lastError || new BackendWakeupError();
 }
 
-export async function fetchLiveMarketFromApi(timeoutMs = 7_000): Promise<MarketLiveTicker | null> {
+export async function fetchLiveMarketFromApi(timeoutMs = API_TIMEOUT_MS): Promise<MarketLiveTicker | null> {
   const session = getBDMarketSession();
   try {
     const res = await fetchFromApiWithFallback('/api/market-live', {}, timeoutMs);
@@ -484,7 +519,7 @@ export function saveCachedTopPicks(payload: TopPicksResponse): void {
   }
 }
 
-export async function fetchLiveTopPicksFromApi(timeoutMs = 12_000): Promise<TopPicksResponse | null> {
+export async function fetchLiveTopPicksFromApi(timeoutMs = API_TIMEOUT_MS): Promise<TopPicksResponse | null> {
   const session = getBDMarketSession();
   try {
     const res = await fetchFromApiWithFallback('/api/top-picks', {}, timeoutMs);
@@ -578,30 +613,45 @@ function handleQuotaExceededResponse(data: unknown): never {
   throw new QuotaExceededError(quotaState, detail);
 }
 
-export async function analyzeStock(symbol: string, exchange: Exchange): Promise<StockAnalysis> {
+export async function fetchStockAnalysis(
+  symbol: string,
+  exchange: Exchange,
+  onEdgeCache?: (cached: StockAnalysis) => void
+): Promise<StockAnalysis> {
   const cleanSym = symbol.trim().toUpperCase();
   if (!cleanSym) {
     throw new StockNotFoundError('অনুগ্রহ করে একটি বৈধ কোম্পানির কোড নির্বাচন করুন।', 422);
   }
 
-  const [quotaHeaders, edgeCached] = await Promise.all([
-    getQuotaRequestHeaders(),
-    getEdgeCachedStockAnalysis(cleanSym, exchange),
-  ]);
+  const syncCached = getEdgeCachedStockAnalysisSync(cleanSym, exchange);
+  if (syncCached && onEdgeCache) {
+    onEdgeCache(syncCached);
+  }
+
+  // Simultaneously check /assets/ml_analysis_cache.json (0ms edge render) while Render responds in background (35s timeout)
+  const edgeCachePromise = syncCached
+    ? Promise.resolve(syncCached)
+    : getEdgeCachedStockAnalysis(cleanSym, exchange).then((cached) => {
+        if (cached && onEdgeCache) {
+          onEdgeCache(cached);
+        }
+        return cached;
+      });
 
   const apiPath = `/api/analyze?symbol=${encodeURIComponent(cleanSym)}&exchange=${encodeURIComponent(exchange)}`;
-  // Allow full 35s for direct Render scraping/XGBoost computation (bypassing Vercel's 10s edge rewrite limit).
-  // Symbols already present in /assets/ml_analysis_cache.json render instantaneously via useStockAnalysis while refreshing live.
-  const perAttemptTimeout = edgeCached ? 15_000 : 35_000;
+  const liveFetchPromise = getQuotaRequestHeaders().then((quotaHeaders) =>
+    fetchFromApiWithFallback(
+      apiPath,
+      { headers: quotaHeaders },
+      API_TIMEOUT_MS
+    )
+  );
 
   let res: Response;
   try {
-    res = await fetchFromApiWithFallback(
-      apiPath,
-      { headers: quotaHeaders },
-      perAttemptTimeout
-    );
+    res = await liveFetchPromise;
   } catch (err) {
+    const edgeCached = await edgeCachePromise;
     if (edgeCached) {
       return edgeCached;
     }
@@ -613,6 +663,8 @@ export async function analyzeStock(symbol: string, exchange: Exchange): Promise<
   if (res.status === 429) {
     handleQuotaExceededResponse(data);
   }
+
+  const edgeCached = await edgeCachePromise;
   if (res.status === 404 || res.status === 422) {
     if (edgeCached) {
       return edgeCached;
@@ -638,6 +690,8 @@ export async function analyzeStock(symbol: string, exchange: Exchange): Promise<
   return normalizeStockAnalysis(data, exchange);
 }
 
+export const analyzeStock = fetchStockAnalysis;
+
 export async function analyzeManualStock(payload: ManualStockPayload): Promise<StockAnalysis> {
   const quotaHeaders = await getQuotaRequestHeaders();
 
@@ -653,7 +707,7 @@ export async function analyzeManualStock(payload: ManualStockPayload): Promise<S
         },
         body: JSON.stringify(payload),
       },
-      12_000
+      API_TIMEOUT_MS
     );
   } catch {
     throw new Error(LIVE_FEED_WAITING_BN);
@@ -690,7 +744,7 @@ export async function analyzeDocuments(
     res = await fetchFromApiWithFallback(
       '/api/analyze-document',
       { method: 'POST', headers: quotaHeaders, body: formData },
-      25_000
+      API_TIMEOUT_MS
     );
   } catch {
     throw new Error(LIVE_FEED_WAITING_BN);

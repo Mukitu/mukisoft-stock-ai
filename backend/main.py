@@ -73,6 +73,7 @@ SESSION_TOKEN_REGEX = re.compile(r"^[A-Za-z0-9_-]{8,128}$")
 SYMBOL_REGEX = re.compile(r"^[A-Z0-9&().-]{1,20}$")
 MAX_UPLOAD_FILES = 5
 MAX_FILE_BYTES = 5 * 1024 * 1024  # 5 MB per file
+UPSTREAM_HTTP_TIMEOUT = 4.0  # Strict 4s cap on all live upstream HTTP / bdshare calls
 ALLOWED_MIME_TYPES = {"application/pdf", "image/png", "image/jpeg", "image/webp"}
 HTTP_HEADERS = {
     "User-Agent": (
@@ -313,7 +314,7 @@ async def _check_bdapps_status_detailed(
             f"{BDAPPS_API_BASE}/check_subscription.php",
             data={"user_mobile": normalized_mobile},
             headers={"Accept": "application/json, text/plain, */*"},
-            timeout=5.0,
+            timeout=UPSTREAM_HTTP_TIMEOUT,
         )
         if resp.status_code == 200:
             payload = resp.json()
@@ -405,7 +406,7 @@ async def call_groq_chat(messages: list[dict[str, Any]], max_tokens: int = 340, 
                     "temperature": temperature,
                     "max_tokens": max_tokens,
                 },
-                timeout=5.0,
+                timeout=UPSTREAM_HTTP_TIMEOUT,
             )
             if resp.status_code == 429:
                 last_err = f"Rate limited on {model_name}"
@@ -421,13 +422,12 @@ async def call_groq_chat(messages: list[dict[str, Any]], max_tokens: int = 340, 
     raise ValueError(last_err)
 
 
-async def generate_humanized_advice(result: dict[str, Any], extra_info: str = "") -> str:
+def build_deterministic_bangla_advice(result: dict[str, Any]) -> str:
     symbol = result["symbol"]
     exchange = result["exchange"]
     price = float(result["current_price"])
     change_pct = float(result.get("change_pct", 0.0))
     rsi = float(result["rsi"])
-    signal = result["signal"]
     confidence = float(result["confidence"])
     target = float(result["target_price"])
     stop_loss = float(result["stop_loss"])
@@ -449,12 +449,32 @@ async def generate_humanized_advice(result: dict[str, Any], extra_info: str = ""
         if macd_hist >= 0
         else "MACD হিস্টোগ্রাম কিছুটা দুর্বল বা কনসলিডেশন চাপ নির্দেশ করছে"
     )
-    fallback = (
+    return (
         f"বর্তমানে {symbol} ({exchange}) শেয়ারটির সর্বশেষ বাজার দর ৳{price:.2f} ({change_pct:+.2f}%) এবং ২০টি টেকনিক্যাল সূচকের মধ্যে "
         f"{bull_votes}টি ইতিবাচক ও {bear_votes}টি সতর্কতামূলক সংকেত দিচ্ছে (XGBoost কনফিডেন্স {confidence:.1f}%)। "
         f"RSI(14) মান {rsi:.1f}, ভলিউম রেশিও {vol_ratio:.2f}x; {trend_note} এবং {momentum_note}। "
         f"গাণিতিক রেফারেন্স রেজিস্ট্যান্স ৳{target:.2f} এবং সাপোর্ট / ঝুঁকি রেফারেন্স ৳{stop_loss:.2f} কেবল তথ্য ও গবেষণামূলক পর্যবেক্ষণের জন্য প্রদর্শিত হয়েছে।"
     )
+
+
+async def generate_humanized_advice(result: dict[str, Any], extra_info: str = "") -> str:
+    symbol = result["symbol"]
+    exchange = result["exchange"]
+    price = float(result["current_price"])
+    change_pct = float(result.get("change_pct", 0.0))
+    rsi = float(result["rsi"])
+    signal = result["signal"]
+    confidence = float(result["confidence"])
+    target = float(result["target_price"])
+    stop_loss = float(result["stop_loss"])
+    bull_votes = int(result["bull_votes"])
+    indicators = result.get("indicators") or {}
+    sma20 = float(indicators.get("sma20", price))
+    ema20 = float(indicators.get("ema20", price))
+    macd_hist = float(indicators.get("macd_hist", 0.0))
+    vol_ratio = float(result.get("vol_ratio", 1.0))
+
+    fallback = build_deterministic_bangla_advice(result)
     if not AI_API_KEY:
         return fallback
 
@@ -650,6 +670,70 @@ def load_symbol_ohlcv_cache(exchange: str, symbol: str) -> tuple[pd.DataFrame, s
     return meta[0], meta[1]
 
 
+def _seed_cache_from_edge_ml_snapshot() -> None:
+    """
+    Seeds warm symbol lookup & per-symbol 90D OHLCV disk cache from
+    public/assets/ml_analysis_cache.json on startup so cold Render deploys
+    serve core DSE/CSE tickers in <50ms even when the market is closed.
+    """
+    edge_cache_file = BASE_DIR.parent / "public" / "assets" / "ml_analysis_cache.json"
+    if not edge_cache_file.exists():
+        return
+    try:
+        raw = json.loads(edge_cache_file.read_text(encoding="utf-8"))
+        analyses = raw.get("analyses") if isinstance(raw, dict) else None
+        if not isinstance(analyses, dict) or not analyses:
+            return
+        seeded_quotes = 0
+        seeded_ohlcv = 0
+        today_iso = str(raw.get("trading_date") or get_bst_now().date().isoformat())[:10]
+        with _WARM_LOOKUP_LOCK:
+            for key, item in analyses.items():
+                if not isinstance(item, dict):
+                    continue
+                parts = str(key).split(":", 1)
+                if len(parts) != 2:
+                    continue
+                exch, sym = parts[0].strip().upper(), parts[1].strip().upper()
+                if exch not in {"DSE", "CSE"} or not SYMBOL_REGEX.match(sym):
+                    continue
+                price = _parse_float(item.get("current_price"))
+                if price > 0 and sym not in _WARM_SYMBOL_LOOKUP[exch]:
+                    chg_pct = _parse_float(item.get("change_pct"))
+                    ycp = round(price / (1.0 + chg_pct / 100.0), 2) if abs(1.0 + chg_pct / 100.0) > 1e-6 else price
+                    _WARM_SYMBOL_LOOKUP[exch][sym] = {
+                        "date": today_iso,
+                        "open": ycp,
+                        "high": price,
+                        "low": min(price, ycp),
+                        "close": price,
+                        "ycp": ycp,
+                        "volume": _parse_float(item.get("volume")),
+                    }
+                    seeded_quotes += 1
+                history = item.get("chart_history")
+                if isinstance(history, list) and len(history) >= 5:
+                    cache_path = _symbol_cache_path(exch, sym)
+                    if not cache_path.exists():
+                        df_hist = _normalize_ohlcv_df(pd.DataFrame(history))
+                        if df_hist is not None and len(df_hist) >= 5:
+                            save_symbol_ohlcv_cache(
+                                exch,
+                                sym,
+                                df_hist,
+                                str(item.get("data_source") or f"Official {exch} Warm 90D OHLCV"),
+                            )
+                            seeded_ohlcv += 1
+        if seeded_quotes or seeded_ohlcv:
+            logger.info(
+                "Seeded startup caches from ml_analysis_cache.json (quotes=%d, ohlcv=%d)",
+                seeded_quotes,
+                seeded_ohlcv,
+            )
+    except Exception as exc:
+        logger.debug("Failed seeding startup caches from ml_analysis_cache.json: %s", exc)
+
+
 def _load_warm_symbol_lookup_from_disk() -> None:
     global _WARM_LOOKUP_UPDATED_TS
     if not SYMBOL_LOOKUP_CACHE_FILE.exists():
@@ -816,7 +900,7 @@ async def scrape_dse_latest_board() -> pd.DataFrame | None:
     home_url = "https://www.dsebd.org/"
     if _is_allowlisted_exchange_url(home_url):
         try:
-            resp = await _http_client.get(home_url, headers=HTTP_HEADERS, timeout=6.0)
+            resp = await _http_client.get(home_url, headers=HTTP_HEADERS, timeout=UPSTREAM_HTTP_TIMEOUT)
             if resp.status_code == 200 and resp.text:
                 unesc = resp.text.replace('\\"', '"')
                 matches = re.findall(
@@ -856,7 +940,7 @@ async def scrape_dse_latest_board() -> pd.DataFrame | None:
         return None
 
     try:
-        resp = await _http_client.get(url, headers=HTTP_HEADERS, timeout=6.0)
+        resp = await _http_client.get(url, headers=HTTP_HEADERS, timeout=UPSTREAM_HTTP_TIMEOUT)
         if resp.status_code != 200 or not resp.text:
             return None
         soup = BeautifulSoup(resp.text, "html.parser")
@@ -904,11 +988,11 @@ async def get_dynamic_dse_board() -> pd.DataFrame | None:
         return cached
 
     session = get_bd_market_session()
-    ttl = 90 if session["is_live"] else 600
+    ttl = 90 if session["is_live"] else 300
 
     async def _bdshare_board_task() -> pd.DataFrame | None:
         try:
-            return await asyncio.wait_for(asyncio.to_thread(_fetch_bdshare_board_sync), timeout=5.5)
+            return await asyncio.wait_for(asyncio.to_thread(_fetch_bdshare_board_sync), timeout=UPSTREAM_HTTP_TIMEOUT)
         except Exception:
             return None
 
@@ -979,7 +1063,7 @@ async def scrape_dse_day_end_archive(symbol: str) -> pd.DataFrame | None:
         return None
 
     try:
-        resp = await _http_client.get(url, headers=HTTP_HEADERS, timeout=6.0)
+        resp = await _http_client.get(url, headers=HTTP_HEADERS, timeout=UPSTREAM_HTTP_TIMEOUT)
         if resp.status_code != 200 or not resp.text:
             return None
         soup = BeautifulSoup(resp.text, "html.parser")
@@ -1028,7 +1112,7 @@ async def scrape_dse_day_end_archive(symbol: str) -> pd.DataFrame | None:
 
 
 async def scrape_cse_board_map() -> dict[str, dict[str, Any]]:
-    """Dynamically scrapes full CSE current price lookup map (timeout=6s)."""
+    """Dynamically scrapes full CSE current price lookup map (timeout=4s)."""
     if _http_client is None:
         return {}
     cached_cse = cache_get("cse_board_map")
@@ -1040,7 +1124,7 @@ async def scrape_cse_board_map() -> dict[str, dict[str, Any]]:
         return {}
 
     try:
-        resp = await _http_client.get(url, headers=HTTP_HEADERS, timeout=6.0)
+        resp = await _http_client.get(url, headers=HTTP_HEADERS, timeout=UPSTREAM_HTTP_TIMEOUT)
         if resp.status_code != 200 or not resp.text:
             return {}
         soup = BeautifulSoup(resp.text, "html.parser")
@@ -1088,29 +1172,45 @@ async def scrape_cse_current_board_quote(symbol: str) -> dict[str, Any] | None:
 async def refresh_warm_symbol_lookup(force: bool = False) -> dict[str, int]:
     """
     Populates and refreshes the warm in-memory + disk symbol lookup table for ALL DSE & CSE
-    tickers so /api/analyze resolves any listed symbol in <1.5 seconds with real exchange data.
+    tickers (bdshare + dsebd.org + cse.com.bd, timeout=4s) so /api/analyze resolves any
+    listed symbol in <1.5 seconds with real exchange data.
     """
     global _WARM_LOOKUP_UPDATED_TS
     if force:
         _TTL_CACHE.pop("dse_board_df", None)
         _TTL_CACHE.pop("cse_board_map", None)
 
-    dse_df, cse_map = await asyncio.gather(
-        get_dynamic_dse_board(),
+    async def _bdshare_board_direct() -> pd.DataFrame | None:
+        try:
+            return await asyncio.wait_for(asyncio.to_thread(_fetch_bdshare_board_sync), timeout=UPSTREAM_HTTP_TIMEOUT)
+        except Exception:
+            return None
+
+    bd_df, scraped_dse_df, cse_map = await asyncio.gather(
+        _bdshare_board_direct(),
+        scrape_dse_latest_board(),
         scrape_cse_board_map(),
         return_exceptions=True,
     )
 
-    dse_map = _board_df_to_lookup_map(dse_df) if isinstance(dse_df, pd.DataFrame) else {}
+    scraped_map = _board_df_to_lookup_map(scraped_dse_df) if isinstance(scraped_dse_df, pd.DataFrame) else {}
+    bd_map = _board_df_to_lookup_map(bd_df) if isinstance(bd_df, pd.DataFrame) else {}
+    # Merge dsebd.org full ticker tape + bdshare real-volume board so 100% of DSE tickers are present
+    dse_map: dict[str, dict[str, Any]] = {**scraped_map, **bd_map}
+    if isinstance(bd_df, pd.DataFrame) and len(bd_df) > 0:
+        cache_set("dse_board_df", bd_df, ttl_seconds=300)
+    elif isinstance(scraped_dse_df, pd.DataFrame) and len(scraped_dse_df) > 0:
+        cache_set("dse_board_df", scraped_dse_df, ttl_seconds=300)
+
     cse_clean = cse_map if isinstance(cse_map, dict) else {}
 
     updated = False
     with _WARM_LOOKUP_LOCK:
         if dse_map:
-            _WARM_SYMBOL_LOOKUP["DSE"] = dse_map
+            _WARM_SYMBOL_LOOKUP["DSE"].update(dse_map)
             updated = True
         if cse_clean:
-            _WARM_SYMBOL_LOOKUP["CSE"] = cse_clean
+            _WARM_SYMBOL_LOOKUP["CSE"].update(cse_clean)
             updated = True
         if updated:
             _WARM_LOOKUP_UPDATED_TS = time.time()
@@ -1140,7 +1240,7 @@ async def scrape_new_dse_company_quote(symbol: str) -> tuple[dict[str, Any], str
         return None
 
     try:
-        resp = await _http_client.get(url, headers=HTTP_HEADERS, timeout=6.0)
+        resp = await _http_client.get(url, headers=HTTP_HEADERS, timeout=UPSTREAM_HTTP_TIMEOUT)
         if resp.status_code != 200 or not resp.text:
             return None
         unesc = resp.text.replace('\\"', '"')
@@ -1216,7 +1316,7 @@ async def scrape_direct_exchange_quote(symbol: str, exchange: str) -> tuple[dict
         if not _is_allowlisted_exchange_url(url):
             continue
         try:
-            resp = await _http_client.get(url, headers=HTTP_HEADERS, timeout=6.0)
+            resp = await _http_client.get(url, headers=HTTP_HEADERS, timeout=UPSTREAM_HTTP_TIMEOUT)
             if resp.status_code != 200 or not resp.text:
                 continue
             if symbol not in resp.text.upper():
@@ -1306,8 +1406,10 @@ async def fetch_dynamic_ohlcv_for_symbol(
 ) -> tuple[pd.DataFrame, str] | None:
     """
     100% Dynamic 24/7 Parallel Multi-Source OHLCV Pipeline with Warm Symbol Lookup:
-      - Fast Path (<0.2s): O(1) warm in-memory/disk symbol lookup quote + fresh persisted 90D real OHLCV
-      - Phase 1 (<1.5s typical, 4.5s cap): Parallel bdshare 90D OHLCV + Direct DSE/CSE live/closing quote
+      - Fast Path (<50ms): Warm board lookup quote + persisted 90D OHLCV disk cache
+      - Off-Market Warm Quote Path (<1.0s): Any DSE/CSE ticker in warm board responds immediately,
+        while 90D history is bounded to 0.9s inline + warmed asynchronously to disk
+      - Live/Cold Phase 1 (<4.0s cap): Parallel bdshare 90D OHLCV + Direct DSE/CSE quote
       - Phase 2 (Fallback only if needed): DSE Day-End Archive + direct company scraper
     Works 24/7 for ANY listed DSE or CSE ticker with zero static/hardcoded prices.
     """
@@ -1319,32 +1421,69 @@ async def fetch_dynamic_ohlcv_for_symbol(
     live_quote: dict[str, Any] | None = _get_warm_lookup_quote(exchange, symbol)
     quote_source = f"Official {exchange} Warm {session_tag} Board" if live_quote else ""
 
-    # Fast Path: if we already have real persisted 90D OHLCV (<6h old during off-market, <15m live)
-    # AND a warm real board quote, merge immediately for <0.2s response time.
+    # 1. Check per-symbol disk cache first (including startup-seeded 90D OHLCV from ml_analysis_cache.json)
     cached_meta = load_symbol_ohlcv_cache_with_meta(exchange, symbol)
     if cached_meta is not None and live_quote is not None:
         cached_df, cached_label, cached_ts = cached_meta
-        max_age_sec = 900 if session["is_live"] else 21_600
+        max_age_sec = 900 if session["is_live"] else 86_400
         if len(cached_df) >= 15 and cached_ts > 0 and (time.time() - cached_ts) <= max_age_sec:
             merged_fast = _merge_quote_into_df(cached_df, live_quote)
             if merged_fast is not None and len(merged_fast) > 0:
                 return merged_fast, f"{cached_label} + {quote_source}"
 
-    # Bounded timeout: if we already have a real warm quote, don't stall waiting >3.5s on slow bdshare
-    bdshare_timeout = 3.5 if live_quote is not None else 5.5
-
     async def _bdshare_hist_task() -> pd.DataFrame | None:
         try:
             return await asyncio.wait_for(
                 asyncio.to_thread(_fetch_bdshare_history_sync, symbol),
-                timeout=bdshare_timeout,
+                timeout=UPSTREAM_HTTP_TIMEOUT,
             )
         except Exception:
             return None
 
+    # 2. Off-market fast path when warm board quote is present but per-symbol disk cache is cold:
+    #    Give bdshare 90D history 0.85s inline; if slower, serve warm board quote immediately (<1s)
+    #    and finish persisting 90D history in the background for the next call.
+    if not session["is_live"] and live_quote is not None and cached_meta is None:
+        hist_task = asyncio.create_task(_bdshare_hist_task())
+        done, _pending = await asyncio.wait({hist_task}, timeout=0.85)
+        if hist_task in done:
+            try:
+                hist_res = hist_task.result()
+                if isinstance(hist_res, pd.DataFrame) and len(hist_res) >= 5:
+                    hist_df = hist_res
+                    source_parts.append(f"bdshare 90D OHLCV ({session_tag})")
+            except Exception:
+                pass
+        else:
+            def _persist_bg_hist(task: asyncio.Task[pd.DataFrame | None]) -> None:
+                try:
+                    bg_df = task.result()
+                    if isinstance(bg_df, pd.DataFrame) and len(bg_df) >= 5:
+                        merged_bg = _merge_quote_into_df(bg_df, live_quote)
+                        if merged_bg is not None and len(merged_bg) > 0:
+                            save_symbol_ohlcv_cache(
+                                exchange,
+                                symbol,
+                                merged_bg,
+                                f"bdshare 90D OHLCV ({session_tag}) + {quote_source}",
+                            )
+                            _TTL_CACHE.pop(f"analyze:{exchange}:{symbol}", None)
+                except Exception:
+                    pass
+
+            hist_task.add_done_callback(_persist_bg_hist)
+
+        final_fast = _merge_quote_into_df(hist_df, live_quote)
+        if final_fast is not None and len(final_fast) > 0:
+            if quote_source:
+                source_parts.append(quote_source)
+            label_fast = " + ".join(source_parts) if source_parts else quote_source
+            save_symbol_ohlcv_cache(exchange, symbol, final_fast, label_fast)
+            return final_fast, label_fast
+
     async def _quote_task() -> tuple[dict[str, Any] | None, str]:
-        # If warm board quote already includes real volume, use it immediately without extra round-trip
-        if live_quote is not None and float(live_quote.get("volume") or 0) > 0:
+        # If warm board quote already includes real volume (or off-market warm quote), use it immediately
+        if live_quote is not None and (float(live_quote.get("volume") or 0) > 0 or not session["is_live"]):
             return live_quote, quote_source
         if exchange == "CSE":
             direct_cse = await scrape_direct_exchange_quote(symbol, "CSE")
@@ -1362,7 +1501,7 @@ async def fetch_dynamic_ohlcv_for_symbol(
             return q, f"DSE {session_tag} Board"
         return None, ""
 
-    # Phase 1: Run history fetch + live/closing quote fetch concurrently
+    # Phase 1: Run history fetch + live/closing quote fetch concurrently (strict 4s upstream cap)
     hist_res, quote_res = await asyncio.gather(
         _bdshare_hist_task(),
         _quote_task(),
@@ -1422,7 +1561,16 @@ async def fetch_and_analyze_stock(symbol: str, exchange: str) -> dict[str, Any] 
 
     df, source_label = fetched
     result = analyze_ohlcv_dataframe(symbol, exchange, df, source_label=source_label)
-    result["ai_analysis_bn"] = await generate_humanized_advice(result, source_label)
+    if AI_API_KEY:
+        try:
+            result["ai_analysis_bn"] = await asyncio.wait_for(
+                generate_humanized_advice(result, source_label),
+                timeout=0.75,
+            )
+        except Exception:
+            result["ai_analysis_bn"] = build_deterministic_bangla_advice(result)
+    else:
+        result["ai_analysis_bn"] = build_deterministic_bangla_advice(result)
     result["session"] = session
     cache_set(cache_key, result, ttl_seconds=180 if session["is_live"] else 600)
     return result
@@ -1436,7 +1584,7 @@ async def _verify_candidate_90d(
         try:
             fetched = await asyncio.wait_for(
                 fetch_dynamic_ohlcv_for_symbol(cand["symbol"], "DSE"),
-                timeout=6.5,
+                timeout=UPSTREAM_HTTP_TIMEOUT,
             )
         except Exception:
             return None
@@ -1575,6 +1723,7 @@ async def lifespan(_app: FastAPI):
     global _http_client
     _http_client = httpx.AsyncClient(follow_redirects=True)
     _load_warm_symbol_lookup_from_disk()
+    _seed_cache_from_edge_ml_snapshot()
 
     async def prewarm_loop() -> None:
         first_run = True
@@ -1597,11 +1746,8 @@ async def lifespan(_app: FastAPI):
             except Exception as exc:
                 logger.warning("Prewarm task iteration failed: %s", exc)
 
-            # Refresh every 5 minutes during live market hours & 2:40 PM closing window, 15 minutes off-market
-            now_after = get_bst_now()
-            sess_after = get_bd_market_session(now_after)
-            sleep_sec = 300 if (sess_after["is_live"] or (now_after.hour == 14 and now_after.minute >= 30)) else 900
-            await asyncio.sleep(sleep_sec)
+            # Refresh full DSE/CSE warm market board cache every 5 minutes (300s)
+            await asyncio.sleep(300)
 
     task = asyncio.create_task(prewarm_loop())
     try:
@@ -1704,7 +1850,7 @@ def _extract_bdshare_indices_sync() -> tuple[str, str, str] | None:
 async def _scrape_dse_indices_fallback() -> tuple[str, str] | None:
     """
     Dynamically scrapes real DSEX & DS30 index values from official https://www.dsebd.org/
-    (parses both new Next.js SSR JSON and legacy HTML text, bounded to timeout=6.0s).
+    (parses both new Next.js SSR JSON and legacy HTML text, bounded to timeout=4.0s).
     """
     if _http_client is None:
         return None
@@ -1712,7 +1858,7 @@ async def _scrape_dse_indices_fallback() -> tuple[str, str] | None:
     if not _is_allowlisted_exchange_url(url):
         return None
     try:
-        resp = await _http_client.get(url, headers=HTTP_HEADERS, timeout=6.0)
+        resp = await _http_client.get(url, headers=HTTP_HEADERS, timeout=UPSTREAM_HTTP_TIMEOUT)
         if resp.status_code != 200 or not resp.text:
             return None
 
@@ -1787,11 +1933,11 @@ async def get_live_ticker() -> dict[str, Any]:
 
     async def _bdshare_idx_task() -> tuple[str, str, str] | None:
         try:
-            return await asyncio.wait_for(asyncio.to_thread(_extract_bdshare_indices_sync), timeout=5.5)
+            return await asyncio.wait_for(asyncio.to_thread(_extract_bdshare_indices_sync), timeout=UPSTREAM_HTTP_TIMEOUT)
         except Exception:
             return None
 
-    # Race official dsebd.org homepage SSR JSON and bdshare.get_market_info() in parallel (<=6s)
+    # Race official dsebd.org homepage SSR JSON and bdshare.get_market_info() in parallel (<=4s)
     scraped_res, bdshare_res = await asyncio.gather(
         _scrape_dse_indices_fallback(),
         _bdshare_idx_task(),

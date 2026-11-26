@@ -8,6 +8,7 @@
  */
 
 export const DEFAULT_RENDER_API_BASE_URL = 'https://mukisoft-stock-ai.onrender.com';
+export const API_TIMEOUT_MS = 35_000;
 
 const BLOCKED_FRONTEND_HOSTS = new Set([
   'stock.mukisoft.tech',
@@ -16,7 +17,7 @@ const BLOCKED_FRONTEND_HOSTS = new Set([
 
 export function resolveBackendApiBaseUrl(rawEnvUrl?: string): string {
   const candidate = String(rawEnvUrl ?? '').trim().replace(/\/+$/, '');
-  if (!candidate || candidate === '/') {
+  if (!candidate || candidate.startsWith('/')) {
     return DEFAULT_RENDER_API_BASE_URL;
   }
 
@@ -26,7 +27,7 @@ export function resolveBackendApiBaseUrl(rawEnvUrl?: string): string {
       return DEFAULT_RENDER_API_BASE_URL;
     }
     const hostname = parsed.hostname.toLowerCase();
-    if (BLOCKED_FRONTEND_HOSTS.has(hostname)) {
+    if (BLOCKED_FRONTEND_HOSTS.has(hostname) || hostname.endsWith('.vercel.app')) {
       return DEFAULT_RENDER_API_BASE_URL;
     }
     return parsed.origin + parsed.pathname.replace(/\/+$/, '');

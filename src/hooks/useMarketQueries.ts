@@ -5,12 +5,13 @@ import {
   StockNotFoundError,
   analyzeDocuments,
   analyzeManualStock,
-  analyzeStock,
   fetchLiveMarketFromApi,
   fetchLiveTopPicksFromApi,
   fetchMarketLive,
+  fetchStockAnalysis,
   fetchTopPicks,
   getEdgeCachedStockAnalysis,
+  getEdgeCachedStockAnalysisSync,
   readCachedMarketLive,
   readCachedTopPicks,
 } from '../services/apiClient';
@@ -103,12 +104,19 @@ export function useTopPicks() {
 
 export function useStockAnalysis(symbol: string, exchange: Exchange, enabled = true) {
   const cleanSym = symbol.trim().toUpperCase();
-  const [edgeCachedData, setEdgeCachedData] = useState<StockAnalysis | undefined>(undefined);
+  const [edgeCachedData, setEdgeCachedData] = useState<StockAnalysis | undefined>(() =>
+    enabled && cleanSym ? getEdgeCachedStockAnalysisSync(cleanSym, exchange) ?? undefined : undefined
+  );
 
-  // Instant (~10ms) edge hydration from /assets/ml_analysis_cache.json when authorized
+  // Instant (0ms) edge hydration from /assets/ml_analysis_cache.json when authorized
   useEffect(() => {
     if (!enabled || !cleanSym) {
       setEdgeCachedData(undefined);
+      return;
+    }
+    const syncHit = getEdgeCachedStockAnalysisSync(cleanSym, exchange);
+    if (syncHit) {
+      setEdgeCachedData(syncHit);
       return;
     }
     let active = true;
@@ -125,7 +133,10 @@ export function useStockAnalysis(symbol: string, exchange: Exchange, enabled = t
 
   const liveQuery = useQuery({
     queryKey: ['stock-analysis', exchange, cleanSym],
-    queryFn: () => analyzeStock(cleanSym, exchange),
+    queryFn: () =>
+      fetchStockAnalysis(cleanSym, exchange, (cached) => {
+        setEdgeCachedData(cached);
+      }),
     enabled: enabled && cleanSym.length > 0,
     staleTime: 180_000,
     retry: (failureCount, error) => {

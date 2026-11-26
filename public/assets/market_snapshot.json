@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "generated_at_bst": "26 Nov 2026, 03:33 PM",
+  "generated_at_bst": "26 Nov 2026, 09:01 PM",
   "trading_date": "2026-11-26",
   "market_status": "closing",
   "indices": {
@@ -12,7 +12,32 @@
     "ds30_change_pct": -0.26,
     "dses": "1,062.94"
   },
+  "session": {
+    "is_live": false,
+    "mode": "post_market",
+    "status_bn": "মার্কেট বন্ধ — সর্বশেষ ক্লোজিং ডেটা প্রদর্শিত",
+    "bd_time": "26 Nov 2026, 09:01 PM BST"
+  },
   "picks": [
+    {
+      "symbol": "POWERGRID",
+      "exchange": "DSE",
+      "price": 37.0,
+      "change_pct": 3.64,
+      "volume": 281226,
+      "vol_ratio": 1.85,
+      "signal_code": 2,
+      "ml_signal_code": 2,
+      "signal": "AI টেকনিক্যাল সিগন্যাল: Strong Bullish Setup (গবেষণামূলক পর্যবেক্ষণ)",
+      "confidence": 99.88,
+      "buy_score": 339.7,
+      "target_price": 39.51,
+      "stop_loss": 35.0,
+      "rsi": 51.4,
+      "bull_votes": 18,
+      "total_votes": 20,
+      "is_sideways": false
+    },
     {
       "symbol": "DESHBANDHU",
       "exchange": "DSE",
@@ -95,23 +120,6 @@
       "stop_loss": 179.94,
       "rsi": 57.9,
       "bull_votes": 18,
-      "total_votes": 20,
-      "is_sideways": false
-    },
-    {
-      "symbol": "BDAUTOCA",
-      "exchange": "DSE",
-      "price": 210.7,
-      "change_pct": 1.44,
-      "signal_code": 2,
-      "ml_signal_code": 2,
-      "signal": "Strong Buy",
-      "confidence": 99.96,
-      "buy_score": 117.88,
-      "target_price": 222.29,
-      "stop_loss": 200.35,
-      "rsi": 55.8,
-      "bull_votes": 17,
       "total_votes": 20,
       "is_sideways": false
     }

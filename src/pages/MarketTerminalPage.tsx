@@ -44,8 +44,9 @@ export function MarketTerminalPage() {
   // automatically load the default sector stock instead of leaving an empty placeholder.
   useEffect(() => {
     if (isSubscribed && !symbol) {
-      const defaultSym = DSE_CSE_SECTORS[sector]?.[0] || 'SQURPHARMA';
-      setSymbol(defaultSym);
+      const defaultSym =
+        DSE_CSE_SECTORS[sector]?.[0] || DSE_CSE_SECTORS[SECTOR_NAMES[0]]?.[0] || '';
+      if (defaultSym) setSymbol(defaultSym);
     }
   }, [isSubscribed, symbol, sector]);
 

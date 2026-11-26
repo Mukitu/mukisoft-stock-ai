@@ -728,11 +728,43 @@ def build_remote_render_ml_snapshots() -> int:
     if isinstance(top_picks_resp, dict) and isinstance(top_picks_resp.get("picks"), list):
         picks = [p for p in top_picks_resp["picks"] if isinstance(p, dict) and p.get("symbol")]
 
-    if not picks and DAILY_PICKS_PATH.exists():
+    # Preserve existing verified closing indices & fields if upstream omitted any index field
+    if MARKET_SNAPSHOT_PATH.exists():
+        try:
+            prev_snap = json.loads(MARKET_SNAPSHOT_PATH.read_text(encoding="utf-8"))
+            prev_idx = prev_snap.get("indices") if isinstance(prev_snap, dict) else None
+            if isinstance(prev_idx, dict):
+                if not indices["dsex"] and prev_idx.get("dsex"):
+                    indices = prev_idx
+                else:
+                    if not indices["ds30"] and prev_idx.get("ds30"):
+                        indices["ds30"] = prev_idx["ds30"]
+                        indices["ds30_change"] = prev_idx.get("ds30_change", 0.0)
+                        indices["ds30_change_pct"] = prev_idx.get("ds30_change_pct", 0.0)
+                    if not indices["dses"] and prev_idx.get("dses"):
+                        indices["dses"] = prev_idx["dses"]
+                    if indices["dsex_change"] == 0.0 and prev_idx.get("dsex_change"):
+                        indices["dsex_change"] = prev_idx["dsex_change"]
+                        indices["dsex_change_pct"] = prev_idx.get("dsex_change_pct", 0.0)
+        except Exception:
+            pass
+
+    # Merge with existing verified closing picks so Buy Radar retains full 6 setups if live scan returned < 6
+    if len(picks) < 6 and DAILY_PICKS_PATH.exists():
         try:
             existing = json.loads(DAILY_PICKS_PATH.read_text(encoding="utf-8"))
-            if isinstance(existing, dict) and existing.get("picks"):
-                picks = existing["picks"]
+            existing_picks = existing.get("picks") if isinstance(existing, dict) else None
+            if isinstance(existing_picks, list) and existing_picks:
+                seen_pick_syms = {str(p.get("symbol", "")).strip().upper() for p in picks}
+                for prev_p in existing_picks:
+                    if not isinstance(prev_p, dict):
+                        continue
+                    prev_sym = str(prev_p.get("symbol", "")).strip().upper()
+                    if prev_sym and prev_sym not in seen_pick_syms:
+                        picks.append(prev_p)
+                        seen_pick_syms.add(prev_sym)
+                    if len(picks) >= 6:
+                        break
         except Exception:
             pass
 
@@ -761,15 +793,6 @@ def build_remote_render_ml_snapshots() -> int:
             if payload:
                 analyses_cache[f"DSE:{sym}"] = payload
                 analyses_cache[f"CSE:{sym}"] = {**payload, "exchange": "CSE"}
-
-    # Preserve existing verified indices only if upstream had an outage
-    if not indices["dsex"] and MARKET_SNAPSHOT_PATH.exists():
-        try:
-            prev_snap = json.loads(MARKET_SNAPSHOT_PATH.read_text(encoding="utf-8"))
-            if isinstance(prev_snap, dict) and isinstance(prev_snap.get("indices"), dict):
-                indices = prev_snap["indices"]
-        except Exception:
-            pass
 
     market_snapshot = {
         "schema_version": 2,
