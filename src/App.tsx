@@ -9,7 +9,7 @@ import { MarketTerminalPage } from './pages/MarketTerminalPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { AboutPage } from './pages/AboutPage';
 import { ContactPage } from './pages/ContactPage';
-import { DisclaimerPage } from './pages/DisclaimerPage';
+import { RiskDisclosurePage } from './pages/RiskDisclosurePage';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -34,8 +34,8 @@ export function App() {
             <Route path="/market" element={<MarketTerminalPage />} />
             <Route path="/about" element={<AboutPage />} />
             <Route path="/contact" element={<ContactPage />} />
-            <Route path="/disclaimer" element={<DisclaimerPage />} />
-            <Route path="/risk-disclosure" element={<DisclaimerPage />} />
+            <Route path="/disclaimer" element={<RiskDisclosurePage />} />
+            <Route path="/risk-disclosure" element={<RiskDisclosurePage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
           <Footer />

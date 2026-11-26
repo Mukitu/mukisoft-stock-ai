@@ -10,7 +10,6 @@ import {
 } from 'lucide-react';
 import {
   ROBI_CIRKLE_DIGITS_REGEX,
-  VERIFY_REDIRECT_GRACE_MS,
   buildActiveSessionFromResponse,
   checkBdappsSubscription,
   clearPendingOtp,
@@ -60,7 +59,6 @@ export function BdappsSubscriptionCard({
   const [consentWarning, setConsentWarning] = useState<string | null>(null);
 
   const otpInputRef = useRef<HTMLInputElement | null>(null);
-  const redirectTimerRef = useRef<number | null>(null);
 
   const CONSENT_REQUIRED_WARNING_BN =
     "এগিয়ে যেতে অনুগ্রহ করে উপরের 'I Agree' ঝুঁকি ও নীতিমালা সম্মতি বক্সে টিক দিন।";
@@ -103,14 +101,6 @@ export function BdappsSubscriptionCard({
       window.setTimeout(() => otpInputRef.current?.focus(), 60);
     }
   }, [step]);
-
-  useEffect(() => {
-    return () => {
-      if (redirectTimerRef.current !== null) {
-        window.clearTimeout(redirectTimerRef.current);
-      }
-    };
-  }, []);
 
   const handleMobileSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -158,13 +148,11 @@ export function BdappsSubscriptionCard({
               ? 'আপনার Robi & Cirkle সাবস্ক্রিপশন সক্রিয় আছে! আপনার কাঙ্ক্ষিত স্টক রিপোর্ট আনলক করা হচ্ছে...'
               : 'আপনার Robi & Cirkle নম্বরটি ইতিমধ্যেই সক্রিয় রয়েছে। ড্যাশবোর্ডে নিয়ে যাওয়া হচ্ছে...'
           );
-          redirectTimerRef.current = window.setTimeout(() => {
-            if (onSubscribed) {
-              onSubscribed(session);
-            } else {
-              navigate('/dashboard', { replace: true, state: { freshHandoff: true } });
-            }
-          }, 400);
+          if (onSubscribed) {
+            onSubscribed(session);
+          } else {
+            navigate('/dashboard', { replace: true, state: { freshHandoff: true } });
+          }
           return;
         }
       } catch {
@@ -193,13 +181,11 @@ export function BdappsSubscriptionCard({
             ? 'আপনার Robi & Cirkle সাবস্ক্রিপশন সক্রিয় আছে! স্টক বিশ্লেষণ আনলক করা হচ্ছে...'
             : 'আপনার Robi & Cirkle সাবস্ক্রিপশন সক্রিয় আছে! ড্যাশবোর্ডে প্রবেশ করা হচ্ছে...'
         );
-        redirectTimerRef.current = window.setTimeout(() => {
-          if (onSubscribed) {
-            onSubscribed(session);
-          } else {
-            navigate('/dashboard', { replace: true, state: { freshHandoff: true } });
-          }
-        }, 400);
+        if (onSubscribed) {
+          onSubscribed(session);
+        } else {
+          navigate('/dashboard', { replace: true, state: { freshHandoff: true } });
+        }
         return;
       }
 
@@ -323,7 +309,7 @@ export function BdappsSubscriptionCard({
           consentAccepted: true,
           consentTimestamp: new Date().toISOString(),
         });
-        // Save session synchronously BEFORE navigation/unlock
+        // Save session synchronously BEFORE immediate unmount-safe navigation/unlock
         saveBdappsSession(session);
         clearPendingOtp();
         setStep('verified');
@@ -333,14 +319,11 @@ export function BdappsSubscriptionCard({
             : 'ভেরিফিকেশন সফল হয়েছে! আপনার প্রিমিয়াম ড্যাশবোর্ড আনলক করা হচ্ছে...'
         );
 
-        // 700ms grace window before unlocking or navigating to /dashboard
-        redirectTimerRef.current = window.setTimeout(() => {
-          if (onSubscribed) {
-            onSubscribed(session);
-          } else {
-            navigate('/dashboard', { replace: true, state: { freshHandoff: true } });
-          }
-        }, VERIFY_REDIRECT_GRACE_MS);
+        if (onSubscribed) {
+          onSubscribed(session);
+        } else {
+          navigate('/dashboard', { replace: true, state: { freshHandoff: true } });
+        }
         return;
       }
 
@@ -394,7 +377,7 @@ export function BdappsSubscriptionCard({
           className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-400 text-blue-700 focus:ring-blue-600 cursor-pointer"
         />
         <span className="min-w-0 break-words">
-          <strong className="text-slate-900">I Agree:</strong> আমি সম্মত হচ্ছি যে, MukiSoft Stock AI শুধুমাত্র একটি শিক্ষামূলক ও ডেটা-ভিত্তিক প্রযুক্তিগত বিশ্লেষণ প্ল্যাটফর্ম (কোনো আর্থিক বা বিনিয়োগ উপদেষ্টা নয়)। শেয়ার বাজারে যেকোনো বিনিয়োগ, লাভ বা ক্ষতির সম্পূর্ণ দায়ভার ও ঝুঁকি (Self-Risk) একান্তই আমার নিজের, এবং এ বিষয়ে MukiSoft Technology-র কোনো আইনি বাধ্যবাধকতা থাকবে না।{' '}
+          <strong className="text-slate-900">I Agree:</strong> আমি সম্মত হচ্ছি যে, MukiSoft Stock AI একটি রিয়েল-টাইম AI মার্কেট সিগন্যাল ও প্রযুক্তিগত বিশ্লেষণ প্ল্যাটফর্ম, যা ডেটা ও অ্যালগরিদমের মাধ্যমে উচ্চ-নির্ভুলতার সিগন্যাল প্রদান করে। তবে শেয়ার বাজারে চূড়ান্ত ফলাফল লাইভ মার্কেট পরিস্থিতির ওপর নির্ভরশীল—তাই যেকোনো বিনিয়োগ, লাভ বা ক্ষতির সম্পূর্ণ দায়ভার ও ঝুঁকি (Self-Risk) একান্তই আমার নিজের, এবং এ বিষয়ে প্ল্যাটফর্মের কোনো আইনি বাধ্যবাধকতা থাকবে না।{' '}
           <a
             href="/risk-disclosure"
             target="_blank"

@@ -6,7 +6,7 @@ interface SelfRiskDisclaimerBannerProps {
 }
 
 export const SELF_RISK_DISCLAIMER_TEXT_BN =
-  '⚠️ বিনিয়োগ ঝুঁকি সতর্কতা (Self-Risk Disclaimer): MukiSoft Stock AI কোনো BSEC-নিবন্ধিত ব্রোকার হাউজ বা আর্থিক উপদেষ্টা নয়। এখানে প্রদর্শিত সকল স্কোর, টার্গেট ও স্টপ-লস কেবল গাণিতিক মডেল ও ঐতিহাসিক ডেটা-ভিত্তিক শিক্ষামূলক পর্যবেক্ষণ। যেকোনো বিনিয়োগ সিদ্ধান্ত সম্পূর্ণ আপনার নিজস্ব ঝুঁকিতে গ্রহণ করুন।';
+  '⚠️ রিয়েল-টাইম মার্কেট সিগন্যাল ও নিজস্ব ঝুঁকি সতর্কতা (Self-Risk Disclaimer): MukiSoft Stock AI একটি রিয়েল-টাইম AI মার্কেট সিগন্যাল ও প্রযুক্তিগত বিশ্লেষণ প্ল্যাটফর্ম (কোনো BSEC-নিবন্ধিত ব্রোকারেজ হাউজ বা আর্থিক উপদেষ্টা নয়)। এখানে প্রদর্শিত সকল স্কোর, টার্গেট ও স্টপ-লস লাইভ ডেটা ও অ্যালগরিদম-ভিত্তিক প্রযুক্তিগত সিগন্যাল—চূড়ান্ত ট্রেডিং সিদ্ধান্ত ও ঝুঁকি সম্পূর্ণভাবে আপনার নিজের।';
 
 export function SelfRiskDisclaimerBanner({ className = '' }: SelfRiskDisclaimerBannerProps) {
   return (
@@ -18,8 +18,8 @@ export function SelfRiskDisclaimerBanner({ className = '' }: SelfRiskDisclaimerB
       <AlertTriangle className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
       <div className="min-w-0 space-y-1">
         <p className="font-medium break-words">
-          <strong className="font-bold">⚠️ বিনিয়োগ ঝুঁকি সতর্কতা (Self-Risk Disclaimer):</strong>{' '}
-          MukiSoft Stock AI কোনো BSEC-নিবন্ধিত ব্রোকার হাউজ বা আর্থিক উপদেষ্টা নয়। এখানে প্রদর্শিত সকল স্কোর, টার্গেট ও স্টপ-লস কেবল গাণিতিক মডেল ও ঐতিহাসিক ডেটা-ভিত্তিক শিক্ষামূলক পর্যবেক্ষণ। যেকোনো বিনিয়োগ সিদ্ধান্ত সম্পূর্ণ আপনার নিজস্ব ঝুঁকিতে গ্রহণ করুন।{' '}
+          <strong className="font-bold">⚠️ রিয়েল-টাইম মার্কেট সিগন্যাল ও নিজস্ব ঝুঁকি সতর্কতা (Self-Risk):</strong>{' '}
+          MukiSoft Stock AI একটি রিয়েল-টাইম AI মার্কেট সিগন্যাল ও প্রযুক্তিগত বিশ্লেষণ প্ল্যাটফর্ম (কোনো BSEC-নিবন্ধিত ব্রোকারেজ হাউজ বা আর্থিক উপদেষ্টা নয়)। এখানে প্রদর্শিত সকল স্কোর, টার্গেট ও স্টপ-লস লাইভ ডেটা ও অ্যালগরিদম-ভিত্তিক প্রযুক্তিগত সিগন্যাল—চূড়ান্ত ট্রেডিং সিদ্ধান্ত ও ঝুঁকি সম্পূর্ণভাবে আপনার নিজের।{' '}
           <Link
             to="/risk-disclosure"
             target="_blank"

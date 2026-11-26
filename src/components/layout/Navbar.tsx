@@ -102,7 +102,7 @@ export function Navbar() {
             </NavLink>
           ))}
           <NavLink
-            to="/disclaimer"
+            to="/risk-disclosure"
             onClick={() => setMobileOpen(false)}
             className={({ isActive }) =>
               `block px-3.5 py-2.5 rounded-lg text-sm font-medium ${
@@ -110,7 +110,7 @@ export function Navbar() {
               }`
             }
           >
-            ঝুঁকি সতর্কতা ও নীতিমালা
+            বিনিয়োগ ঝুঁকি ও নীতিমালা
           </NavLink>
 
           <div className="pt-3 mt-2 border-t border-slate-200">

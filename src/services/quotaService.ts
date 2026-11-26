@@ -7,7 +7,7 @@
 
 import { getDeviceFingerprintHash } from '../utils/deviceFingerprint';
 import { toBanglaDigits } from '../utils/quantConsensus';
-import { getBdappsSession, isSessionActive } from './bdappsService';
+import { BDAPPS_API_BASE, getBdappsSession, isSessionActive } from './bdappsService';
 
 export const FREE_QUOTA_LIMIT = 2;
 export const QUOTA_WINDOW_SECONDS = 86_400; // 24 hours
@@ -19,8 +19,10 @@ const DEFAULT_API_BASE = (
 ).replace(/\/+$/, '');
 
 export const QUOTA_ENDPOINT_URL = (
-  import.meta.env.VITE_QUOTA_API_URL || `${DEFAULT_API_BASE}/api/free-quota`
+  import.meta.env.VITE_QUOTA_API_URL || `${BDAPPS_API_BASE}/free_quota.php`
 ).trim();
+
+const FALLBACK_QUOTA_ENDPOINT_URL = `${DEFAULT_API_BASE}/api/free-quota`;
 
 export interface FreeQuotaState {
   allowed: boolean;
@@ -182,23 +184,35 @@ export async function getQuotaRequestHeaders(): Promise<Record<string, string>> 
   return headers;
 }
 
-async function postQuotaEndpoint(
+async function postSingleQuotaUrl(
+  url: string,
   body: Record<string, unknown>,
   timeoutMs = 8_000
 ): Promise<{ status: number; data: Record<string, unknown> } | null> {
   const controller = new AbortController();
   const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+  const isPhpEndpoint = url.toLowerCase().includes('.php');
+
   try {
-    const res = await fetch(QUOTA_ENDPOINT_URL, {
+    const formFields: Record<string, string> = {};
+    for (const [key, val] of Object.entries(body)) {
+      if (val !== undefined && val !== null) {
+        formFields[key] = String(val);
+      }
+    }
+
+    const res = await fetch(url, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
+        'Content-Type': isPhpEndpoint
+          ? 'application/x-www-form-urlencoded;charset=UTF-8'
+          : 'application/json',
         Accept: 'application/json',
         ...(typeof body.deviceHash === 'string' ? { 'X-Device-Hash': body.deviceHash } : {}),
         ...(typeof body.subscriberId === 'string' ? { 'X-Subscriber-Id': body.subscriberId } : {}),
         ...(typeof body.mobile === 'string' ? { 'X-Subscriber-Mobile': body.mobile } : {}),
       },
-      body: JSON.stringify(body),
+      body: isPhpEndpoint ? new URLSearchParams(formFields).toString() : JSON.stringify(body),
       signal: controller.signal,
     });
 
@@ -216,6 +230,19 @@ async function postQuotaEndpoint(
   } finally {
     window.clearTimeout(timer);
   }
+}
+
+async function postQuotaEndpoint(
+  body: Record<string, unknown>,
+  timeoutMs = 8_000
+): Promise<{ status: number; data: Record<string, unknown> } | null> {
+  const primary = await postSingleQuotaUrl(QUOTA_ENDPOINT_URL, body, timeoutMs);
+  if (primary) return primary;
+
+  if (FALLBACK_QUOTA_ENDPOINT_URL !== QUOTA_ENDPOINT_URL) {
+    return postSingleQuotaUrl(FALLBACK_QUOTA_ENDPOINT_URL, body, timeoutMs);
+  }
+  return null;
 }
 
 /**

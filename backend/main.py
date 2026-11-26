@@ -258,12 +258,19 @@ async def verify_bdapps_subscriber(
         )
         if resp.status_code == 200:
             payload = resp.json()
-            status = str(payload.get("subscriptionStatus", "")).strip().upper()
+            raw_status = str(payload.get("subscriptionStatus", "")).strip().upper()
+            status = re.sub(r"\s+", " ", re.sub(r"[_-]+", " ", raw_status))
             code = str(payload.get("statusCode", "")).strip().upper()
             is_active = bool(
                 payload.get("isSubscribed") is True
-                or status in {"REGISTERED", "INITIAL CHARGING PENDING"}
+                or status in {"REGISTERED", "INITIAL CHARGING PENDING", "PENDING"}
                 or code == "E1351"
+                or (
+                    payload.get("success") is True
+                    and code == "S1000"
+                    and status not in {"UNREGISTERED", "DEREGISTERED", "EXPIRED"}
+                    and payload.get("isSubscribed") is not False
+                )
             )
             cache_set(cache_key, is_active, ttl_seconds=300 if is_active else 30)
             return is_active
@@ -358,9 +365,9 @@ async def generate_humanized_advice(result: dict[str, Any], extra_info: str = ""
         return fallback
 
     prompt = (
-        "You are a Bangladesh Stock Exchange educational data research assistant. "
-        "Write a concise 3-sentence plain Bangla (বাংলা লিপি) objective technical observation with NO HTML, markdown, headings, or imperative buy/sell commands. "
-        "Never tell the user to buy or sell; frame target and stop-loss strictly as mathematical technical reference levels for educational analysis.\n"
+        "You are a Bangladesh Stock Exchange real-time quantitative market signal and technical analysis engine. "
+        "Write a concise 3-sentence plain Bangla (বাংলা লিপি) objective technical signal summary with NO HTML, markdown, headings, or legally binding investment advice. "
+        "Present target and stop-loss clearly as algorithmic technical reference levels while leaving final trading decisions to the user.\n"
         f"Stock: {symbol} ({exchange}), Price: {price} BDT, RSI(14): {rsi}, "
         f"Technical Signal: {signal} ({bull_votes}/20 bullish indicators, ML confidence {confidence}%), "
         f"Reference Resistance: {target} BDT, Reference Support: {stop_loss} BDT. Context: {extra_info}"

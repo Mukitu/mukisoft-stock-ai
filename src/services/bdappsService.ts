@@ -89,7 +89,19 @@ export function maskSubscriberId(subscriberId: string): string {
 export function normalizeSubscriptionStatus(status?: string): string {
   return String(status || '')
     .trim()
-    .toUpperCase();
+    .toUpperCase()
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ');
+}
+
+export function isPendingChargingStatus(status?: string): boolean {
+  const normalized = normalizeSubscriptionStatus(status);
+  return normalized === 'INITIAL CHARGING PENDING' || normalized === 'PENDING';
+}
+
+export function isAuthenticatedStatus(status?: string): boolean {
+  const normalized = normalizeSubscriptionStatus(status);
+  return normalized === 'REGISTERED' || isPendingChargingStatus(normalized);
 }
 
 export function isActiveSubscriptionPayload(data: BdappsApiResponse | null | undefined): boolean {
@@ -98,27 +110,33 @@ export function isActiveSubscriptionPayload(data: BdappsApiResponse | null | und
   const code = String(data.statusCode || '')
     .trim()
     .toUpperCase();
+  const isExplicitlyInactive =
+    status === 'UNREGISTERED' || status === 'DEREGISTERED' || status === 'EXPIRED';
+
   return (
     data.isSubscribed === true ||
-    status === 'REGISTERED' ||
-    status === 'INITIAL CHARGING PENDING' ||
-    code === 'E1351'
+    isAuthenticatedStatus(status) ||
+    code === 'E1351' ||
+    (data.success === true &&
+      code === 'S1000' &&
+      !isExplicitlyInactive &&
+      data.isSubscribed !== false)
   );
 }
 
 export function isUnregisteredPayload(data: BdappsApiResponse | null | undefined): boolean {
   if (!data) return false;
+  if (isActiveSubscriptionPayload(data)) return false;
   const status = normalizeSubscriptionStatus(data.subscriptionStatus);
   if (status === 'UNREGISTERED' || status === 'DEREGISTERED' || status === 'EXPIRED') {
     return true;
   }
-  return data.isSubscribed === false && status !== 'REGISTERED' && status !== 'INITIAL CHARGING PENDING';
+  return data.isSubscribed === false;
 }
 
 export function isSessionActive(session: BdappsSession | null | undefined): session is BdappsSession {
   if (!session) return false;
-  const status = normalizeSubscriptionStatus(session.subscriptionStatus);
-  return status === 'REGISTERED' || status === 'INITIAL CHARGING PENDING';
+  return isAuthenticatedStatus(session.subscriptionStatus);
 }
 
 export function isWithinFreshGraceWindow(session: BdappsSession | null | undefined): boolean {
@@ -307,9 +325,9 @@ export function buildActiveSessionFromResponse(
   source: BdappsSession['source'],
   consent?: { consentAccepted?: boolean; consentTimestamp?: string }
 ): BdappsSession {
-  const rawStatus = normalizeSubscriptionStatus(data.subscriptionStatus);
-  const subscriptionStatus =
-    rawStatus === 'INITIAL CHARGING PENDING' ? 'INITIAL CHARGING PENDING' : 'REGISTERED';
+  const subscriptionStatus = isPendingChargingStatus(data.subscriptionStatus)
+    ? 'INITIAL CHARGING PENDING'
+    : 'REGISTERED';
   const digits = mobile.replace(/\D/g, '');
   const fallbackSubscriberId = `tel:${digits.startsWith('880') ? digits : `880${digits}`}`;
 

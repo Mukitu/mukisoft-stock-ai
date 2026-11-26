@@ -413,7 +413,7 @@ export function buildStructuredBanglaReport(analysis: StockAnalysis): Structured
     decisionTitle = STRONG_BUY_BADGE_BN;
     consensusVerdictLine = formatStrongBuyConsensusLine(bullCount);
     decisionSummary = `গাণিতিক ও কোয়ান্টিটেটিভ বিশ্লেষণে ${symbol} (${exchange}) শেয়ারটিতে ${consensusVerdictLine} (মডেল কনফিডেন্স ${confidence.toFixed(1)}%)। ঐতিহাসিক প্রাইস ট্রেন্ড ও মোমেন্টাম সূচকসমূহ ঊর্ধ্বমুখী প্রবণতা প্রদর্শন করছে।`;
-    actionNote = `ঐতিহাসিক প্রাইস অ্যাকশন ও ভোলাটিলিটি মডেল অনুযায়ী বর্তমান দর ৳${price.toFixed(2)}-এর বিপরীতে রেজিস্ট্যান্স রেফারেন্স লেভেল-১ ৳${r1.toFixed(2)} (+${gainPct}%) এবং লেভেল-২ ৳${r2.toFixed(2)} হিসাবে গণনা করা হয়েছে (কেবল শিক্ষামূলক পর্যবেক্ষণ)।`;
+    actionNote = `লাইভ প্রাইস অ্যাকশন ও ভোলাটিলিটি মডেল অনুযায়ী বর্তমান দর ৳${price.toFixed(2)}-এর বিপরীতে রেজিস্ট্যান্স টার্গেট লেভেল-১ ৳${r1.toFixed(2)} (+${gainPct}%) এবং লেভেল-২ ৳${r2.toFixed(2)} হিসাবে গণনা করা হয়েছে (রিয়েল-টাইম AI মার্কেট সিগন্যাল ও প্রযুক্তিগত বিশ্লেষণ)।`;
   } else if (analysis.action_type === 'SELL') {
     decisionTitle = 'AI টেকনিক্যাল সিগন্যাল: High Risk / Bearish Pressure (গবেষণামূলক পর্যবেক্ষণ)';
     consensusVerdictLine = `২০টি সূচকের মধ্যে ${toBanglaDigits(bearCount)}টি নেতিবাচক টেকনিক্যাল সংকেত • শুধুমাত্র তথ্য ও বিশ্লেষণের জন্য`;

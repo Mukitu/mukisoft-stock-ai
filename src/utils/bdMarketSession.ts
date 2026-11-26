@@ -43,7 +43,7 @@ export function getBDMarketSession(baseDate: Date = new Date()): MarketSessionIn
       cardTiming: 'রিয়েল-টাইম টেকনিক্যাল পর্যবেক্ষণ (Live)',
       badge: 'লাইভ মার্কেট সেশন চলছে (১০:০০ AM – ২:৩০ PM BST)',
       headline: 'লাইভ AI টেকনিক্যাল র‍্যাডার: Strong Bullish Setup পর্যবেক্ষণ',
-      subtext: 'রিয়েল-টাইম বাজার দর, ১৭-ফিচার XGBoost ML ও ২০-ইন্ডিকেটর ভিত্তিক শিক্ষামূলক টেকনিক্যাল বিশ্লেষণ',
+      subtext: 'রিয়েল-টাইম বাজার দর, ১৭-ফিচার XGBoost ML ও ২০-ইন্ডিকেটর ভিত্তিক রিয়েল-টাইম AI মার্কেট সিগন্যাল ও প্রযুক্তিগত বিশ্লেষণ',
       bd_time: bdTime,
     };
   }
@@ -67,7 +67,7 @@ export function getBDMarketSession(baseDate: Date = new Date()): MarketSessionIn
       cardTiming: 'সাপ্তাহিক ক্লোজিং ডেটা পর্যবেক্ষণ',
       badge: 'সাপ্তাহিক মার্কেট বন্ধ · পরবর্তী সেশন রবিবার সকাল ১০:০০টা',
       headline: 'সাপ্তাহিক AI র‍্যাডার: Strong Bullish Setup পর্যবেক্ষণ',
-      subtext: 'সাপ্তাহিক ক্লোজিং ডেটা ও ২০-ইন্ডিকেটর বিশ্লেষণে চিহ্নিত শিক্ষামূলক টেকনিক্যাল তালিকা',
+      subtext: 'সাপ্তাহিক ক্লোজিং ডেটা ও ২০-ইন্ডিকেটর বিশ্লেষণে চিহ্নিত রিয়েল-টাইম AI মার্কেট সিগন্যাল ও প্রযুক্তিগত বিশ্লেষণ তালিকা',
       bd_time: bdTime,
     };
   }

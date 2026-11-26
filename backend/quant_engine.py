@@ -73,7 +73,7 @@ def get_bd_market_session(now: dt.datetime | None = None) -> dict[str, Any]:
             "mode": "LIVE",
             "badge": "লাইভ মার্কেট চলছে (১০:০০ AM – ২:৩০ PM BST)",
             "headline": "লাইভ টেকনিক্যাল বুলিশ সেটআপ রাডার (Strong Bullish Setup)",
-            "subtext": "রিয়েল-টাইম বাজার দর, ১৭-ফিচার XGBoost ML ও ২০-ইন্ডিকেটর কনসেনসাস ভিত্তিক শিক্ষামূলক পর্যবেক্ষণ",
+            "subtext": "রিয়েল-টাইম বাজার দর, ১৭-ফিচার XGBoost ML ও ২০-ইন্ডিকেটর কনসেনসাস ভিত্তিক রিয়েল-টাইম AI মার্কেট সিগন্যাল ও প্রযুক্তিগত বিশ্লেষণ",
             "bd_time": bd_now.strftime("%d %b %Y, %I:%M %p"),
         }
 
